@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_body_heatmap/flutter_body_heatmap.dart';
 
 import '../../data/models/exercise.dart';
 import '../../data/models/metric_entry.dart';
 import '../../data/repositories/lift_repository.dart';
 import '../../services/app_services.dart';
+import '../../services/readiness_engine.dart';
 import '../../services/training_composition_service.dart';
 import '../../services/trend_engine.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/app_card.dart';
+import '../../widgets/info_tooltip.dart';
 import '../../widgets/labeled_trend_chart.dart';
 import '../../widgets/status_card.dart';
 import '../../widgets/training_composition_chart.dart';
@@ -30,6 +33,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final Map<int, List<SessionWithSets>> _sessionsByExercise = {};
   final List<String> _flags = [];
   List<CategoryComposition> _compositions = [];
+  Map<Muscle, double> _readiness = {};
 
   @override
   void initState() {
@@ -49,6 +53,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final exercises = await AppServices.exercises.getAll();
     final steps = await AppServices.metrics.getByType(MetricType.steps, limit: 14);
     final compositions = await TrainingCompositionService.compute();
+    final readiness = await ReadinessEngine.computeMuscleReadiness();
 
     final sessionsByExercise = <int, List<SessionWithSets>>{};
     final flags = <String>[];
@@ -72,6 +77,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ..clear()
         ..addAll(flags);
       _compositions = compositions;
+      _readiness = readiness;
       _loading = false;
     });
   }
@@ -111,6 +117,59 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: WeekRings(
                       stepsByDate: _stepsByDate,
                       workoutDates: _workoutDates,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.large),
+                  Row(
+                    children: [
+                      Text('Primed for Growth', style: AppText.subHeader),
+                      const InfoTooltip(
+                        glossaryKey: 'readiness',
+                        title: 'Primed for Growth',
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.standard),
+                  AppCard(
+                    child: SizedBox(
+                      height: 160,
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: AspectRatio(
+                              aspectRatio: 724 / 1448,
+                              child: BodyHeatmap(
+                                side: BodySide.front,
+                                data: {
+                                  for (final entry in _readiness.entries)
+                                    entry.key: MuscleData(intensity: entry.value),
+                                },
+                                colors: const [AppColors.surfaceRaised, AppColors.good],
+                                bodyColor: AppColors.surfaceRaised,
+                                borderColor: AppColors.textSecondary,
+                                showBorder: true,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: AppSpacing.standard),
+                          Expanded(
+                            child: AspectRatio(
+                              aspectRatio: 724 / 1448,
+                              child: BodyHeatmap(
+                                side: BodySide.back,
+                                data: {
+                                  for (final entry in _readiness.entries)
+                                    entry.key: MuscleData(intensity: entry.value),
+                                },
+                                colors: const [AppColors.surfaceRaised, AppColors.good],
+                                bodyColor: AppColors.surfaceRaised,
+                                borderColor: AppColors.textSecondary,
+                                showBorder: true,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                   const SizedBox(height: AppSpacing.large),

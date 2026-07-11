@@ -1,3 +1,5 @@
+import 'package:sqflite/sqflite.dart';
+
 import '../database.dart';
 import '../models/lift_session.dart';
 import '../models/lift_set.dart';
@@ -11,6 +13,10 @@ class SessionWithSets {
   /// Highest e1RM among this session's sets — used for trend charts.
   double get bestE1rm =>
       sets.isEmpty ? 0 : sets.map((s) => s.e1rm).reduce((a, b) => a > b ? a : b);
+
+  /// Sum of RPE across this session's sets (missing RPE counts as 0) — used
+  /// for the Workouts tab's relative-intensity bar.
+  double get rpeSum => sets.fold<double>(0, (sum, s) => sum + (s.rpe ?? 0));
 }
 
 class LiftRepository {
@@ -31,13 +37,34 @@ class LiftRepository {
       (await _db.database)
           .delete('lift_sessions', where: 'id = ?', whereArgs: [sessionId]);
 
-  /// All sessions (with sets) for a given exercise, most recent first.
-  Future<List<SessionWithSets>> getSessionsForExercise(int exerciseId) async {
+  /// Replaces all sets for a session in one go — used when editing a logged
+  /// session, simpler than diffing individual set changes.
+  Future<void> replaceSets(int sessionId, List<LiftSet> sets) async {
     final db = await _db.database;
+    await db.delete('lift_sets', where: 'session_id = ?', whereArgs: [sessionId]);
+    for (var i = 0; i < sets.length; i++) {
+      await db.insert(
+        'lift_sets',
+        LiftSet(
+          sessionId: sessionId,
+          setNumber: i + 1,
+          reps: sets[i].reps,
+          weight: sets[i].weight,
+          rpe: sets[i].rpe,
+        ).toMap(),
+      );
+    }
+  }
+
+  Future<List<SessionWithSets>> _querySessions(
+    Database db, {
+    String? where,
+    List<Object?>? whereArgs,
+  }) async {
     final sessionRows = await db.query(
       'lift_sessions',
-      where: 'exercise_id = ?',
-      whereArgs: [exerciseId],
+      where: where,
+      whereArgs: whereArgs,
       orderBy: 'date DESC, id DESC',
     );
 
@@ -53,6 +80,19 @@ class LiftRepository {
       result.add(SessionWithSets(session, setRows.map(LiftSet.fromMap).toList()));
     }
     return result;
+  }
+
+  /// All sessions (with sets) for a given exercise, most recent first.
+  Future<List<SessionWithSets>> getSessionsForExercise(int exerciseId) async {
+    final db = await _db.database;
+    return _querySessions(db, where: 'exercise_id = ?', whereArgs: [exerciseId]);
+  }
+
+  /// All sessions (with sets) across every exercise, most recent first —
+  /// used by the Lifts screen's "Workouts" tab.
+  Future<List<SessionWithSets>> getAllSessions() async {
+    final db = await _db.database;
+    return _querySessions(db);
   }
 
   /// Convenience: log a full session in one call (session + its sets).

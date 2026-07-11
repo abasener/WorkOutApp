@@ -71,6 +71,44 @@ class _AddExerciseSheetState extends State<AddExerciseSheet> {
     if (mounted) Navigator.pop(context);
   }
 
+  Future<void> _delete() async {
+    final sessions =
+        await AppServices.lifts.getSessionsForExercise(widget.existing!.id!);
+    if (!mounted) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surfaceRaised,
+        title: Text('Delete ${widget.existing!.name}?', style: AppText.subHeader),
+        content: Text(
+          sessions.isEmpty
+              ? 'This exercise has no logged sessions. This cannot be undone.'
+              : 'This also deletes all ${sessions.length} logged session'
+                  '${sessions.length == 1 ? '' : 's'} for this exercise. This cannot be undone.',
+          style: AppText.bodyText,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel', style: AppText.bodyText),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete', style: TextStyle(color: AppColors.accent)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    await AppServices.exercises.delete(widget.existing!.id!);
+    AppServices.signalReload();
+    // Returns `true` so a caller showing this exercise's own detail screen
+    // knows to pop itself too — the exercise it was showing no longer exists.
+    if (mounted) Navigator.pop(context, true);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -149,6 +187,21 @@ class _AddExerciseSheetState extends State<AddExerciseSheet> {
                       : const Text('Save'),
                 ),
               ),
+              if (_isEditing) ...[
+                const SizedBox(height: AppSpacing.standard),
+                SizedBox(
+                  width: double.infinity,
+                  height: 44,
+                  child: OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: AppColors.accent),
+                      foregroundColor: AppColors.accent,
+                    ),
+                    onPressed: _saving ? null : _delete,
+                    child: const Text('Delete Exercise'),
+                  ),
+                ),
+              ],
             ],
           ),
         ),

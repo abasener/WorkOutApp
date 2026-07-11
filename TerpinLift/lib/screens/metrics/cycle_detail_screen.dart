@@ -1,19 +1,58 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 
+import '../../data/models/metric_entry.dart';
+import '../../data/repositories/lift_repository.dart';
 import '../../services/app_services.dart';
 import '../../services/cycle_analysis.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/app_card.dart';
 import '../../widgets/simple_bar_chart.dart';
 
+/// What can be overlaid on the calendar alongside the period-flow dots.
+/// Colors deliberately reuse the same 5 categorical hues as the Training
+/// Composition chart (blue/aqua/green/yellow/violet) — distinct from the
+/// flow dots' red, and already validated to read well together.
+enum CycleOverlay { none, sleep, steps, workout, intensity, prs }
+
+extension on CycleOverlay {
+  String get label {
+    switch (this) {
+      case CycleOverlay.none:
+        return 'None';
+      case CycleOverlay.sleep:
+        return 'Sleep';
+      case CycleOverlay.steps:
+        return 'Steps';
+      case CycleOverlay.workout:
+        return 'Workout days';
+      case CycleOverlay.intensity:
+        return 'Intensity (avg RPE)';
+      case CycleOverlay.prs:
+        return 'PRs';
+    }
+  }
+
+  Color get color {
+    switch (this) {
+      case CycleOverlay.none:
+        return Colors.transparent;
+      case CycleOverlay.sleep:
+        return const Color(0xFF3987E5);
+      case CycleOverlay.steps:
+        return const Color(0xFF199E70);
+      case CycleOverlay.workout:
+        return const Color(0xFF008300);
+      case CycleOverlay.intensity:
+        return const Color(0xFFC98500);
+      case CycleOverlay.prs:
+        return const Color(0xFF9085E9);
+    }
+  }
+}
+
 /// Cycle tracking detail — reached only by tapping the nondescript Cycle
 /// card on Metrics, never surfaced on Home. See designFiles/00_UX_DESIGN.md.
-///
-/// A metric-overlay dropdown (sleep/steps/workout days/intensity/PRs plotted
-/// against the calendar) is planned but deliberately not built yet — noted
-/// in designFiles/09_SCREEN_cycle_detail.md as a documented next step rather
-/// than a half-built control here.
 class CycleDetailScreen extends StatefulWidget {
   const CycleDetailScreen({super.key});
 
@@ -26,6 +65,9 @@ class _CycleDetailScreenState extends State<CycleDetailScreen> {
   Map<String, int> _flowByDate = {};
   CycleStats _stats = const CycleStats(periodLengths: [], cycleLengths: []);
   DateTime _focusedMonth = DateTime(DateTime.now().year, DateTime.now().month);
+
+  CycleOverlay _overlay = CycleOverlay.none;
+  Map<String, double> _overlayValues = {};
 
   @override
   void initState() {
@@ -44,9 +86,83 @@ class _CycleDetailScreenState extends State<CycleDetailScreen> {
       _stats = CycleAnalysis.compute(flowEntries);
       _loading = false;
     });
+    await _loadOverlay();
   }
 
   String _fmtDate(DateTime d) => d.toIso8601String().substring(0, 10);
+
+  bool _inFocusedMonth(DateTime d) =>
+      d.year == _focusedMonth.year && d.month == _focusedMonth.month;
+
+  Future<void> _loadOverlay() async {
+    if (_overlay == CycleOverlay.none) {
+      if (mounted) setState(() => _overlayValues = {});
+      return;
+    }
+
+    final values = <String, double>{};
+
+    switch (_overlay) {
+      case CycleOverlay.none:
+        break;
+      case CycleOverlay.sleep:
+      case CycleOverlay.steps:
+        final type =
+            _overlay == CycleOverlay.sleep ? MetricType.sleepHours : MetricType.steps;
+        final entries = await AppServices.metrics.getByType(type);
+        final inRange =
+            entries.where((e) => _inFocusedMonth(DateTime.parse(e.date))).toList();
+        if (inRange.isNotEmpty) {
+          final minV = inRange.map((e) => e.value).reduce((a, b) => a < b ? a : b);
+          final maxV = inRange.map((e) => e.value).reduce((a, b) => a > b ? a : b);
+          final range = (maxV - minV).abs() < 1e-9 ? 1.0 : (maxV - minV);
+          for (final e in inRange) {
+            values[e.date] = ((e.value - minV) / range).clamp(0.0, 1.0);
+          }
+        }
+      case CycleOverlay.workout:
+        final workoutDates = await AppServices.lifts.getAllWorkoutDates();
+        for (final d in workoutDates) {
+          if (_inFocusedMonth(DateTime.parse(d))) values[d] = 1.0;
+        }
+      case CycleOverlay.intensity:
+        final sessions = await AppServices.lifts.getAllSessions();
+        final rpesByDate = <String, List<double>>{};
+        for (final s in sessions) {
+          if (!_inFocusedMonth(DateTime.parse(s.session.date))) continue;
+          for (final set in s.sets) {
+            if (set.rpe != null) {
+              rpesByDate.putIfAbsent(s.session.date, () => []).add(set.rpe!);
+            }
+          }
+        }
+        for (final entry in rpesByDate.entries) {
+          final avg = entry.value.reduce((a, b) => a + b) / entry.value.length;
+          values[entry.key] = (avg / 10).clamp(0.0, 1.0);
+        }
+      case CycleOverlay.prs:
+        final sessions = await AppServices.lifts.getAllSessions();
+        final byExercise = <int, List<SessionWithSets>>{};
+        for (final s in sessions) {
+          byExercise.putIfAbsent(s.session.exerciseId, () => []).add(s);
+        }
+        for (final group in byExercise.values) {
+          final sorted = [...group]..sort((a, b) => a.session.date.compareTo(b.session.date));
+          var runningMax = 0.0;
+          for (final s in sorted) {
+            if (s.bestE1rm > runningMax) {
+              if (_inFocusedMonth(DateTime.parse(s.session.date))) {
+                values[s.session.date] = 1.0;
+              }
+              runningMax = s.bestE1rm;
+            }
+          }
+        }
+    }
+
+    if (!mounted) return;
+    setState(() => _overlayValues = values);
+  }
 
   Future<void> _pickFlow(DateTime day) async {
     var selected = _flowByDate[_fmtDate(day)] ?? 0;
@@ -202,16 +318,54 @@ class _CycleDetailScreenState extends State<CycleDetailScreen> {
             children: [
               IconButton(
                 icon: const Icon(Icons.chevron_left, color: AppColors.textSecondary),
-                onPressed: () => setState(() => _focusedMonth =
-                    DateTime(_focusedMonth.year, _focusedMonth.month - 1)),
+                onPressed: () {
+                  setState(() =>
+                      _focusedMonth = DateTime(_focusedMonth.year, _focusedMonth.month - 1));
+                  _loadOverlay();
+                },
               ),
               Text(DateFormat('MMMM yyyy').format(_focusedMonth), style: AppText.subHeader),
               IconButton(
                 icon: const Icon(Icons.chevron_right, color: AppColors.textSecondary),
-                onPressed: () => setState(() => _focusedMonth =
-                    DateTime(_focusedMonth.year, _focusedMonth.month + 1)),
+                onPressed: () {
+                  setState(() =>
+                      _focusedMonth = DateTime(_focusedMonth.year, _focusedMonth.month + 1));
+                  _loadOverlay();
+                },
               ),
             ],
+          ),
+          const SizedBox(height: AppSpacing.standard),
+          DropdownButton<CycleOverlay>(
+            value: _overlay,
+            isExpanded: true,
+            dropdownColor: AppColors.surfaceRaised,
+            underline: Container(height: 1, color: AppColors.border),
+            style: AppText.bodyText,
+            items: CycleOverlay.values
+                .map((o) => DropdownMenuItem(
+                      value: o,
+                      child: Row(
+                        children: [
+                          if (o != CycleOverlay.none) ...[
+                            Container(
+                              width: 10,
+                              height: 10,
+                              decoration:
+                                  BoxDecoration(color: o.color, shape: BoxShape.circle),
+                            ),
+                            const SizedBox(width: AppSpacing.small),
+                          ],
+                          Text('Overlay: ${o.label}'),
+                        ],
+                      ),
+                    ))
+                .toList(),
+            onChanged: (v) {
+              if (v == null) return;
+              setState(() => _overlay = v);
+              _loadOverlay();
+            },
           ),
           const SizedBox(height: AppSpacing.small),
           _buildCalendar(),
@@ -247,33 +401,45 @@ class _CycleDetailScreenState extends State<CycleDetailScreen> {
           itemBuilder: (context, index) {
             if (index < leadingBlanks) return const SizedBox.shrink();
             final day = DateTime(_focusedMonth.year, _focusedMonth.month, index - leadingBlanks + 1);
-            final flow = _flowByDate[_fmtDate(day)];
-            final isToday = _fmtDate(day) == _fmtDate(DateTime.now());
+            final dateStr = _fmtDate(day);
+            final flow = _flowByDate[dateStr];
+            final isToday = dateStr == _fmtDate(DateTime.now());
+            final overlayValue = _overlayValues[dateStr];
+
             return InkWell(
               onTap: () => _pickFlow(day),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    '${day.day}',
-                    style: AppText.smallText.copyWith(
-                      color: isToday ? AppColors.accent : AppColors.textPrimary,
-                      fontWeight: isToday ? FontWeight.w700 : FontWeight.w400,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  if (flow != null && flow > 0)
-                    Container(
-                      width: 4.0 + flow * 2.0,
-                      height: 4.0 + flow * 2.0,
-                      decoration: const BoxDecoration(
-                        color: AppColors.accent,
-                        shape: BoxShape.circle,
+              child: Container(
+                margin: const EdgeInsets.all(1),
+                decoration: BoxDecoration(
+                  color: overlayValue != null
+                      ? _overlay.color.withValues(alpha: 0.15 + overlayValue * 0.45)
+                      : null,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      '${day.day}',
+                      style: AppText.smallText.copyWith(
+                        color: isToday ? AppColors.accent : AppColors.textPrimary,
+                        fontWeight: isToday ? FontWeight.w700 : FontWeight.w400,
                       ),
-                    )
-                  else
-                    const SizedBox(height: 8),
-                ],
+                    ),
+                    const SizedBox(height: 2),
+                    if (flow != null && flow > 0)
+                      Container(
+                        width: 4.0 + flow * 2.0,
+                        height: 4.0 + flow * 2.0,
+                        decoration: const BoxDecoration(
+                          color: AppColors.accent,
+                          shape: BoxShape.circle,
+                        ),
+                      )
+                    else
+                      const SizedBox(height: 8),
+                  ],
+                ),
               ),
             );
           },

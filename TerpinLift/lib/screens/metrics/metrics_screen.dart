@@ -155,7 +155,7 @@ class _MetricsScreenState extends State<MetricsScreen> {
                                     in MuscleMap.broadGroups[entry.key] ?? const <Muscle>[])
                                   muscle: MuscleData(intensity: entry.value / 5.0),
                             },
-                            colors: const [AppColors.surfaceRaised, AppColors.accent],
+                            colors: const [AppColors.surfaceRaised, AppColors.muscleHigh],
                             bodyColor: AppColors.surfaceRaised,
                             borderColor: AppColors.textSecondary,
                           ),
@@ -173,7 +173,7 @@ class _MetricsScreenState extends State<MetricsScreen> {
                                     in MuscleMap.broadGroups[entry.key] ?? const <Muscle>[])
                                   muscle: MuscleData(intensity: entry.value / 5.0),
                             },
-                            colors: const [AppColors.surfaceRaised, AppColors.accent],
+                            colors: const [AppColors.surfaceRaised, AppColors.muscleHigh],
                             bodyColor: AppColors.surfaceRaised,
                             borderColor: AppColors.textSecondary,
                           ),

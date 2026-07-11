@@ -13,6 +13,12 @@ abstract class AppColors {
   static const Color accentDim = Color(0xFF5C1620);
   static const Color good = Color(0xFF3FA75C);
   static const Color warn = Color(0xFFE0A62D);
+
+  /// Softer, less saturated red used for muscle-map highlights (soreness map,
+  /// "muscles worked" diagram) — the full-bright `accent` red read as too
+  /// intense/harsh when filling large body-silhouette regions rather than
+  /// small UI accents.
+  static const Color muscleHigh = Color(0xFFA13A3A);
 }
 
 abstract class AppSpacing {

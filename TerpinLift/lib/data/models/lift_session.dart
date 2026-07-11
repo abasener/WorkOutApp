@@ -31,4 +31,13 @@ class LiftSession {
         'completed_at': completedAt,
         'notes': notes,
       };
+
+  LiftSession copyWith({String? date, String? notes}) => LiftSession(
+        id: id,
+        exerciseId: exerciseId,
+        date: date ?? this.date,
+        startedAt: startedAt,
+        completedAt: completedAt,
+        notes: notes ?? this.notes,
+      );
 }

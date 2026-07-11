@@ -4,6 +4,7 @@ import '../../services/app_services.dart';
 import '../../services/backup_service.dart';
 import '../../services/test_data_service.dart';
 import '../../services/units.dart';
+import '../../services/user_profile.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/app_card.dart';
 
@@ -16,6 +17,14 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _busy = false;
+  late final _birthYearController =
+      TextEditingController(text: UserProfile.birthYear?.toString() ?? '');
+
+  @override
+  void dispose() {
+    _birthYearController.dispose();
+    super.dispose();
+  }
 
   Future<void> _export() async {
     setState(() => _busy = true);
@@ -103,6 +112,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() {});
   }
 
+  Future<void> _setGender(Gender gender) async {
+    if (UserProfile.gender == gender) return;
+    await AppServices.setGender(gender);
+    setState(() {});
+  }
+
+  Future<void> _saveBirthYear(String text) async {
+    final year = int.tryParse(text.trim());
+    final currentYear = DateTime.now().year;
+    if (text.trim().isNotEmpty && (year == null || year < 1900 || year > currentYear)) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Enter a valid birth year.')));
+      return;
+    }
+    await AppServices.setBirthYear(year);
+    setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -111,6 +138,46 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(AppSpacing.edge),
         children: [
+          Text('Profile', style: AppText.subHeader),
+          const SizedBox(height: AppSpacing.standard),
+          AppCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(child: Text('Gender', style: AppText.bodyText)),
+                    _GenderToggle(selected: UserProfile.gender, onChanged: _setGender),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.standard),
+                Row(
+                  children: [
+                    Expanded(child: Text('Birth year', style: AppText.bodyText)),
+                    SizedBox(
+                      width: 90,
+                      child: TextField(
+                        controller: _birthYearController,
+                        keyboardType: TextInputType.number,
+                        textAlign: TextAlign.center,
+                        style: AppText.bodyText,
+                        decoration: const InputDecoration(hintText: 'e.g. 1998'),
+                        onSubmitted: _saveBirthYear,
+                        onTapOutside: (_) => _saveBirthYear(_birthYearController.text),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.small),
+                Text(
+                  'Used for bodyweight-ratio strength-standard goals — age and '
+                  'gender both affect realistic targets, not shown anywhere else.',
+                  style: AppText.smallText,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: AppSpacing.large),
           Text('Units', style: AppText.subHeader),
           const SizedBox(height: AppSpacing.standard),
           AppCard(
@@ -283,6 +350,47 @@ class _UnitToggle extends StatelessWidget {
               ),
               child: Text(
                 u.key.toUpperCase(),
+                style: AppText.smallText.copyWith(
+                  color: isSelected ? Colors.white : AppColors.textSecondary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
+class _GenderToggle extends StatelessWidget {
+  final Gender selected;
+  final ValueChanged<Gender> onChanged;
+  const _GenderToggle({required this.selected, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surfaceRaised,
+        borderRadius: BorderRadius.circular(AppRadius.pill),
+        border: Border.all(color: AppColors.border),
+      ),
+      padding: const EdgeInsets.all(3),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: Gender.values.map((g) {
+          final isSelected = g == selected;
+          return GestureDetector(
+            onTap: () => onChanged(g),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              decoration: BoxDecoration(
+                color: isSelected ? AppColors.accent : Colors.transparent,
+                borderRadius: BorderRadius.circular(AppRadius.pill),
+              ),
+              child: Text(
+                g.label,
                 style: AppText.smallText.copyWith(
                   color: isSelected ? Colors.white : AppColors.textSecondary,
                   fontWeight: FontWeight.w600,

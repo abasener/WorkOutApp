@@ -155,7 +155,7 @@ class _SorenessBodyMapFormState extends State<SorenessBodyMapForm> {
                         child: BodyHeatmap(
                           side: BodySide.front,
                           data: data,
-                          colors: const [AppColors.surfaceRaised, AppColors.accent],
+                          colors: const [AppColors.surfaceRaised, AppColors.muscleHigh],
                           bodyColor: AppColors.surface,
                           borderColor: AppColors.textSecondary,
                           onMusclePressed: _onMuscleTap,
@@ -169,7 +169,7 @@ class _SorenessBodyMapFormState extends State<SorenessBodyMapForm> {
                         child: BodyHeatmap(
                           side: BodySide.back,
                           data: data,
-                          colors: const [AppColors.surfaceRaised, AppColors.accent],
+                          colors: const [AppColors.surfaceRaised, AppColors.muscleHigh],
                           bodyColor: AppColors.surface,
                           borderColor: AppColors.textSecondary,
                           onMusclePressed: _onMuscleTap,

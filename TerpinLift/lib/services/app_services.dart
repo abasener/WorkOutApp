@@ -8,6 +8,7 @@ import '../data/repositories/lift_repository.dart';
 import '../data/repositories/metrics_repository.dart';
 import '../data/repositories/settings_repository.dart';
 import 'units.dart';
+import 'user_profile.dart';
 
 abstract final class AppServices {
   static late final DatabaseHelper db;
@@ -19,6 +20,8 @@ abstract final class AppServices {
   static late final SettingsRepository settings;
 
   static const _unitSettingKey = 'weight_unit';
+  static const _genderSettingKey = 'gender';
+  static const _birthYearSettingKey = 'birth_year';
 
   /// Bump whenever a write happens that other screens should reflect.
   static final reloadSignal = ValueNotifier<int>(0);
@@ -39,11 +42,29 @@ abstract final class AppServices {
 
     final storedUnit = await settings.get(_unitSettingKey);
     Units.current = WeightUnitKey.fromKey(storedUnit);
+
+    final storedGender = await settings.get(_genderSettingKey);
+    UserProfile.gender = GenderKey.fromKey(storedGender);
+
+    final storedBirthYear = await settings.get(_birthYearSettingKey);
+    UserProfile.birthYear = storedBirthYear == null ? null : int.tryParse(storedBirthYear);
   }
 
   static Future<void> setWeightUnit(WeightUnit unit) async {
     Units.current = unit;
     await settings.set(_unitSettingKey, unit.key);
+    signalReload();
+  }
+
+  static Future<void> setGender(Gender gender) async {
+    UserProfile.gender = gender;
+    await settings.set(_genderSettingKey, gender.key);
+    signalReload();
+  }
+
+  static Future<void> setBirthYear(int? birthYear) async {
+    UserProfile.birthYear = birthYear;
+    await settings.set(_birthYearSettingKey, birthYear?.toString() ?? '');
     signalReload();
   }
 }

@@ -11,7 +11,7 @@ extension LiftIntensityLabel on LiftIntensity {
       case LiftIntensity.normal:
         return 'Normal';
       case LiftIntensity.recovery:
-        return 'Recovery / light';
+        return 'Light';
     }
   }
 }
@@ -66,6 +66,13 @@ class TrendEngine {
   /// +/-50lb band around the goal per the user's request — a placeholder
   /// band width until a real error-region model (recovery-aware, growing
   /// with distance from known data) replaces it later.
+  ///
+  /// This is a "try for this next" progressive-overload target, NOT a
+  /// same-day prediction — it deliberately does not factor in today's
+  /// soreness/sleep/recency (that's `ReadinessEngine`'s job, kept separate:
+  /// this answers "what should I aim for over time," Primed for Growth
+  /// answers "how do I look today"). A navigation aid toward a sensible next
+  /// PR, not a coach claiming to know what you'll hit on any given day.
   static (double low, double goal, double high)? predictNextE1rm(
     List<SessionWithSets> sessions,
   ) {
@@ -85,8 +92,28 @@ class TrendEngine {
     final rpeWeight = avgRpe == null ? 0.5 : (avgRpe / 10).clamp(0.2, 1.0);
     final blended = (lastSession.bestE1rm * rpeWeight) + (avgE1rm * (1 - rpeWeight));
 
-    const smallOverloadStep = 1.02; // conservative +2% suggestion
-    final goal = blended * smallOverloadStep;
+    // Scale the suggested overload step by the recent trend direction —
+    // same slump-detection comparison `ReadinessEngine.overloadTrendFactor`
+    // uses (last session vs. the average of the prior up-to-3), so a fixed
+    // step doesn't get suggested regardless of whether progress is actually
+    // happening. Real progressive-overload practice: push harder while
+    // trending up, hold/consolidate during a plateau or emerging slump
+    // rather than chasing a new number anyway.
+    final priorWindow = recent.skip(1).take(3).toList();
+    var overloadStep = 1.015; // default: modest nudge when the trend is flat
+    if (priorWindow.isNotEmpty) {
+      final priorAvgE1rm =
+          priorWindow.map((s) => s.bestE1rm).reduce((a, b) => a + b) / priorWindow.length;
+      if (priorAvgE1rm > 0) {
+        if (lastSession.bestE1rm < priorAvgE1rm * 0.95) {
+          overloadStep = 1.0; // emerging slump -> consolidate, don't chase a new number
+        } else if (lastSession.bestE1rm > priorAvgE1rm * 1.02) {
+          overloadStep = 1.03; // clearly trending up -> a bigger ask is reasonable
+        }
+      }
+    }
+
+    final goal = blended * overloadStep;
 
     const band = 50.0;
     return (goal - band, goal, goal + band);

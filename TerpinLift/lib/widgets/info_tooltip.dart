@@ -11,12 +11,31 @@ class Glossary {
             "7 = you probably had about 3 more reps in you. Lower numbers = an "
             "easier/recovery-style set. This isn't about pain, just effort.",
     'soreness':
-        'How sore you are today, 1-10, independent of any specific lift. Used '
-            'to judge recovery, not to compare against a specific workout.',
+        'How sore an area is right now, on a 0-5 scale, independent of any '
+            'specific lift. Used to judge recovery, not to compare against a '
+            'specific workout.',
     'e1rm':
         "An estimate of your max single-rep lift, calculated from whatever "
             "reps/weight you actually did. Lets a 5-rep set and a 3-rep set at "
             "different weights compare fairly on the same scale.",
+    'readiness':
+        "How ready each muscle looks to be trained hard again, blending a "
+            "few things: how long it's been since you last trained it (bigger "
+            "muscle groups like legs and back get a longer recovery window "
+            "than smaller ones like arms, based on typical strength-training "
+            "recovery guidance), how sore that area currently is, your recent "
+            "sleep, whether your effort (RPE) has been creeping up there "
+            "lately, and whether your lift numbers for it have dipped "
+            "against your recent average. Greener = more ready, dimmer = "
+            "still recovering. It's a heuristic blend of real training-"
+            "science signals, not a lab measurement of your actual muscles.",
+    'strength_goal':
+        'A long-term target based on how your current best lift compares to '
+            'commonly cited bodyweight-ratio strength standards (e.g. squat = '
+            "some multiple of bodyweight), adjusted for gender and a broad age "
+            "bracket. These are directional, generalized figures — not a "
+            "personally measured standard — meant to help guide steady "
+            "progress, not to say what you should be able to lift.",
   };
 
   static String textFor(String key) =>
