@@ -7,12 +7,16 @@ class AppCard extends StatelessWidget {
   final Widget child;
   final VoidCallback? onTap;
   final EdgeInsetsGeometry padding;
+  final Color? backgroundColor;
+  final Color? borderColor;
 
   const AppCard({
     super.key,
     required this.child,
     this.onTap,
     this.padding = const EdgeInsets.all(AppSpacing.cardPad),
+    this.backgroundColor,
+    this.borderColor,
   });
 
   @override
@@ -21,8 +25,8 @@ class AppCard extends StatelessWidget {
       width: double.infinity,
       padding: padding,
       decoration: BoxDecoration(
-        color: AppColors.surface,
-        border: Border.all(color: AppColors.border),
+        color: backgroundColor ?? AppColors.surface,
+        border: Border.all(color: borderColor ?? AppColors.border),
         borderRadius: BorderRadius.circular(AppRadius.card),
       ),
       child: child,

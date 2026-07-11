@@ -1,13 +1,78 @@
-import 'exercise.dart';
+/// Soreness sub-regions — finer than the 5 broad `ExerciseCategory` groups,
+/// grouped by common lift-pattern differences rather than exhaustive
+/// anatomy (e.g. deadlift/good-morning soreness vs. pulldown/pull-up
+/// soreness are both "back" but genuinely different tissue). Chest stays a
+/// single region — no common-pattern split volunteered for it. See
+/// designFiles/05_SCREEN_metrics.md.
+enum SorenessRegion {
+  chest,
+  coreCenter,
+  coreSides,
+  upperBack,
+  lowerBack,
+  biceps,
+  triceps,
+  shoulders,
+  forearms,
+  quads,
+  hamstrings,
+  glutes,
+  calves,
+  innerThigh,
+}
+
+extension SorenessRegionLabel on SorenessRegion {
+  String get label {
+    switch (this) {
+      case SorenessRegion.chest:
+        return 'Chest';
+      case SorenessRegion.coreCenter:
+        return 'Abs';
+      case SorenessRegion.coreSides:
+        return 'Obliques';
+      case SorenessRegion.upperBack:
+        return 'Upper Back';
+      case SorenessRegion.lowerBack:
+        return 'Lower Back';
+      case SorenessRegion.biceps:
+        return 'Biceps';
+      case SorenessRegion.triceps:
+        return 'Triceps';
+      case SorenessRegion.shoulders:
+        return 'Shoulders';
+      case SorenessRegion.forearms:
+        return 'Forearms';
+      case SorenessRegion.quads:
+        return 'Quads';
+      case SorenessRegion.hamstrings:
+        return 'Hamstrings';
+      case SorenessRegion.glutes:
+        return 'Glutes';
+      case SorenessRegion.calves:
+        return 'Calves';
+      case SorenessRegion.innerThigh:
+        return 'Inner Thigh';
+    }
+  }
+}
 
 enum MetricType {
   steps,
   sleepHours,
-  sorenessCore,
-  sorenessBack,
-  sorenessArms,
-  sorenessLegs,
   sorenessChest,
+  sorenessCoreCenter,
+  sorenessCoreSides,
+  sorenessUpperBack,
+  sorenessLowerBack,
+  sorenessBiceps,
+  sorenessTriceps,
+  sorenessShoulders,
+  sorenessForearms,
+  sorenessQuads,
+  sorenessHamstrings,
+  sorenessGlutes,
+  sorenessCalves,
+  sorenessInnerThigh,
 }
 
 extension MetricTypeKey on MetricType {
@@ -17,16 +82,34 @@ extension MetricTypeKey on MetricType {
         return 'steps';
       case MetricType.sleepHours:
         return 'sleep_hours';
-      case MetricType.sorenessCore:
-        return 'soreness_core';
-      case MetricType.sorenessBack:
-        return 'soreness_back';
-      case MetricType.sorenessArms:
-        return 'soreness_arms';
-      case MetricType.sorenessLegs:
-        return 'soreness_legs';
       case MetricType.sorenessChest:
         return 'soreness_chest';
+      case MetricType.sorenessCoreCenter:
+        return 'soreness_core_center';
+      case MetricType.sorenessCoreSides:
+        return 'soreness_core_sides';
+      case MetricType.sorenessUpperBack:
+        return 'soreness_upper_back';
+      case MetricType.sorenessLowerBack:
+        return 'soreness_lower_back';
+      case MetricType.sorenessBiceps:
+        return 'soreness_biceps';
+      case MetricType.sorenessTriceps:
+        return 'soreness_triceps';
+      case MetricType.sorenessShoulders:
+        return 'soreness_shoulders';
+      case MetricType.sorenessForearms:
+        return 'soreness_forearms';
+      case MetricType.sorenessQuads:
+        return 'soreness_quads';
+      case MetricType.sorenessHamstrings:
+        return 'soreness_hamstrings';
+      case MetricType.sorenessGlutes:
+        return 'soreness_glutes';
+      case MetricType.sorenessCalves:
+        return 'soreness_calves';
+      case MetricType.sorenessInnerThigh:
+        return 'soreness_inner_thigh';
     }
   }
 
@@ -36,35 +119,45 @@ extension MetricTypeKey on MetricType {
         return 'Steps';
       case MetricType.sleepHours:
         return 'Sleep';
-      case MetricType.sorenessCore:
-        return 'Core Soreness';
-      case MetricType.sorenessBack:
-        return 'Back Soreness';
-      case MetricType.sorenessArms:
-        return 'Arms Soreness';
-      case MetricType.sorenessLegs:
-        return 'Legs Soreness';
-      case MetricType.sorenessChest:
-        return 'Chest Soreness';
+      default:
+        return '${sorenessRegion!.label} Soreness';
     }
   }
 
-  bool get isSoreness => sorenessCategory != null;
+  bool get isSoreness => sorenessRegion != null;
 
-  /// The body-part category this soreness metric tracks, or null for
-  /// non-soreness metrics (steps, sleep).
-  ExerciseCategory? get sorenessCategory {
+  /// The soreness sub-region this metric tracks, or null for non-soreness
+  /// metrics (steps, sleep).
+  SorenessRegion? get sorenessRegion {
     switch (this) {
-      case MetricType.sorenessCore:
-        return ExerciseCategory.core;
-      case MetricType.sorenessBack:
-        return ExerciseCategory.back;
-      case MetricType.sorenessArms:
-        return ExerciseCategory.arms;
-      case MetricType.sorenessLegs:
-        return ExerciseCategory.legs;
       case MetricType.sorenessChest:
-        return ExerciseCategory.chest;
+        return SorenessRegion.chest;
+      case MetricType.sorenessCoreCenter:
+        return SorenessRegion.coreCenter;
+      case MetricType.sorenessCoreSides:
+        return SorenessRegion.coreSides;
+      case MetricType.sorenessUpperBack:
+        return SorenessRegion.upperBack;
+      case MetricType.sorenessLowerBack:
+        return SorenessRegion.lowerBack;
+      case MetricType.sorenessBiceps:
+        return SorenessRegion.biceps;
+      case MetricType.sorenessTriceps:
+        return SorenessRegion.triceps;
+      case MetricType.sorenessShoulders:
+        return SorenessRegion.shoulders;
+      case MetricType.sorenessForearms:
+        return SorenessRegion.forearms;
+      case MetricType.sorenessQuads:
+        return SorenessRegion.quads;
+      case MetricType.sorenessHamstrings:
+        return SorenessRegion.hamstrings;
+      case MetricType.sorenessGlutes:
+        return SorenessRegion.glutes;
+      case MetricType.sorenessCalves:
+        return SorenessRegion.calves;
+      case MetricType.sorenessInnerThigh:
+        return SorenessRegion.innerThigh;
       case MetricType.steps:
       case MetricType.sleepHours:
         return null;
@@ -74,21 +167,36 @@ extension MetricTypeKey on MetricType {
   static MetricType fromKey(String key) =>
       MetricType.values.firstWhere((t) => t.key == key);
 
-  static MetricType forSorenessCategory(ExerciseCategory category) {
-    switch (category) {
-      case ExerciseCategory.core:
-        return MetricType.sorenessCore;
-      case ExerciseCategory.back:
-        return MetricType.sorenessBack;
-      case ExerciseCategory.arms:
-        return MetricType.sorenessArms;
-      case ExerciseCategory.legs:
-        return MetricType.sorenessLegs;
-      case ExerciseCategory.chest:
+  static MetricType forSorenessRegion(SorenessRegion region) {
+    switch (region) {
+      case SorenessRegion.chest:
         return MetricType.sorenessChest;
-      case ExerciseCategory.push:
-      case ExerciseCategory.pull:
-        throw ArgumentError('push/pull are not soreness-tracked body parts');
+      case SorenessRegion.coreCenter:
+        return MetricType.sorenessCoreCenter;
+      case SorenessRegion.coreSides:
+        return MetricType.sorenessCoreSides;
+      case SorenessRegion.upperBack:
+        return MetricType.sorenessUpperBack;
+      case SorenessRegion.lowerBack:
+        return MetricType.sorenessLowerBack;
+      case SorenessRegion.biceps:
+        return MetricType.sorenessBiceps;
+      case SorenessRegion.triceps:
+        return MetricType.sorenessTriceps;
+      case SorenessRegion.shoulders:
+        return MetricType.sorenessShoulders;
+      case SorenessRegion.forearms:
+        return MetricType.sorenessForearms;
+      case SorenessRegion.quads:
+        return MetricType.sorenessQuads;
+      case SorenessRegion.hamstrings:
+        return MetricType.sorenessHamstrings;
+      case SorenessRegion.glutes:
+        return MetricType.sorenessGlutes;
+      case SorenessRegion.calves:
+        return MetricType.sorenessCalves;
+      case SorenessRegion.innerThigh:
+        return MetricType.sorenessInnerThigh;
     }
   }
 }

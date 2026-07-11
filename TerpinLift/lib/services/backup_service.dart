@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:path/path.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../data/profile_manager.dart';
 import 'app_services.dart';
 
 /// Export/import of the full local database to a single JSON file, kept in
@@ -20,9 +21,12 @@ class BackupService {
     'app_settings',
   ];
 
+  /// Scoped by the active profile so a demo export/import can never collide
+  /// with (or accidentally overwrite) a personal one, or vice versa.
   static Future<File> _exportFile() async {
     final dir = await getApplicationDocumentsDirectory();
-    return File(join(dir.path, 'terpinlift_export.json'));
+    final suffix = AppServices.activeProfile.value == AppProfile.demo ? '_demo' : '';
+    return File(join(dir.path, 'terpinlift_export$suffix.json'));
   }
 
   /// Writes every table to a JSON file and returns its path.

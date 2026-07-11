@@ -14,6 +14,25 @@ class SessionWithSets {
   double get bestE1rm =>
       sets.isEmpty ? 0 : sets.map((s) => s.e1rm).reduce((a, b) => a > b ? a : b);
 
+  /// Bodyweight-aware e1RM for `ExerciseType.bodyweight` movements. Plain
+  /// `e1rm`/`bestE1rm` multiply directly by `LiftSet.weight`, which for a
+  /// bodyweight lift is only the *added* load (signed — negative for
+  /// assisted, 0 for plain bodyweight, positive once weight is added), so it
+  /// breaks down at 0/negative (Epley always returns 0 at weight=0, and goes
+  /// negative when assisted, which stops meaning "estimated max"). This
+  /// instead feeds Epley the *total* load actually moved
+  /// (`bodyweightLb + addedLoad`), which stays positive and monotonic across
+  /// the whole assisted -> bodyweight -> weighted range.
+  double bodyweightAdjustedBestE1rm(double bodyweightLb) {
+    if (sets.isEmpty) return 0;
+    return sets
+        .map((s) {
+          final effectiveLoad = (bodyweightLb + s.weight).clamp(0.0, double.infinity);
+          return s.reps <= 1 ? effectiveLoad : effectiveLoad * (1 + s.reps / 30);
+        })
+        .reduce((a, b) => a > b ? a : b);
+  }
+
   /// Sum of RPE across this session's sets (missing RPE counts as 0) — used
   /// for the Workouts tab's relative-intensity bar.
   double get rpeSum => sets.fold<double>(0, (sum, s) => sum + (s.rpe ?? 0));

@@ -22,6 +22,13 @@ class BodyweightRepository {
   Future<int> insert(BodyweightEntry e) async =>
       (await _db.database).insert('bodyweight_log', e.toMap());
 
+  Future<void> update(BodyweightEntry e) async => (await _db.database).update(
+        'bodyweight_log',
+        e.toMap(),
+        where: 'id = ?',
+        whereArgs: [e.id],
+      );
+
   Future<void> delete(int id) async => (await _db.database)
       .delete('bodyweight_log', where: 'id = ?', whereArgs: [id]);
 }

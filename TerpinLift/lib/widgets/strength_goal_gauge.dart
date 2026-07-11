@@ -14,14 +14,21 @@ class StrengthGoalGauge extends StatelessWidget {
   final Map<StrengthTier, double> tierTargets;
   final double currentE1rm;
 
+  /// Defaults to unit-aware weight formatting; pass an override (e.g. a
+  /// rep-count formatter) for bodyweight exercises where the gauge tracks
+  /// reps instead of lb.
+  final String Function(double)? formatValue;
+
   const StrengthGoalGauge({
     super.key,
     required this.tierTargets,
     required this.currentE1rm,
+    this.formatValue,
   });
 
   @override
   Widget build(BuildContext context) {
+    final format = formatValue ?? Units.format;
     final currentTier = StrengthStandards.currentTier(currentE1rm, tierTargets);
     final domainMax = tierTargets[StrengthTier.elite]! * 1.05;
 
@@ -44,7 +51,7 @@ class StrengthGoalGauge extends StatelessWidget {
                         .clamp(0.0, width - labelWidth),
                     width: labelWidth,
                     child: Text(
-                      Units.format(tierTargets[tier]!),
+                      format(tierTargets[tier]!),
                       textAlign: TextAlign.center,
                       style: AppText.smallText.copyWith(
                         fontSize: 10,
@@ -93,7 +100,7 @@ class StrengthGoalGauge extends StatelessWidget {
             ),
             const SizedBox(height: AppSpacing.standard),
             Text(
-              'Current max: ${Units.format(currentE1rm)}',
+              'Current max: ${format(currentE1rm)}',
               style: AppText.smallText,
             ),
           ],

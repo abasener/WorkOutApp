@@ -11,27 +11,52 @@ import '../../widgets/date_picker_field.dart';
 /// per region) instead of here — see designFiles/00_UX_DESIGN.md.
 enum SimpleMetricKind { bodyweight, sleep, steps }
 
+/// Pass [editingId] + [initialValue]/[initialDate]/[initialLoggedAt] to edit
+/// an already-logged entry in place instead of inserting a new one — reached
+/// from the Metrics "Days" tab when a value was mistyped.
 class LogSimpleMetricForm extends StatefulWidget {
   final SimpleMetricKind kind;
-  const LogSimpleMetricForm({super.key, required this.kind});
+  final int? editingId;
+  final double? initialValue;
+  final DateTime? initialDate;
+  final String? initialLoggedAt;
+
+  const LogSimpleMetricForm({
+    super.key,
+    required this.kind,
+    this.editingId,
+    this.initialValue,
+    this.initialDate,
+    this.initialLoggedAt,
+  });
 
   @override
   State<LogSimpleMetricForm> createState() => _LogSimpleMetricFormState();
 }
 
 class _LogSimpleMetricFormState extends State<LogSimpleMetricForm> {
-  final _controller = TextEditingController();
+  late final _controller = TextEditingController(
+    text: widget.initialValue == null
+        ? ''
+        : (widget.kind == SimpleMetricKind.bodyweight
+            ? Units.displayValue(widget.initialValue!)
+            : widget.initialValue!)
+            .toStringAsFixed(widget.kind == SimpleMetricKind.sleep ? 1 : 0),
+  );
   bool _saving = false;
-  DateTime _date = DateTime.now();
+  late DateTime _date = widget.initialDate ?? DateTime.now();
+
+  bool get _isEditing => widget.editingId != null;
 
   String get _title {
+    final prefix = _isEditing ? 'Edit' : 'Log';
     switch (widget.kind) {
       case SimpleMetricKind.bodyweight:
-        return 'Log Weight';
+        return '$prefix Weight';
       case SimpleMetricKind.sleep:
-        return 'Log Sleep';
+        return '$prefix Sleep';
       case SimpleMetricKind.steps:
-        return 'Log Steps';
+        return '$prefix Steps';
     }
   }
 
@@ -61,20 +86,31 @@ class _LogSimpleMetricFormState extends State<LogSimpleMetricForm> {
     if (widget.kind == SimpleMetricKind.bodyweight) {
       // Entered in whatever unit is currently displayed -> convert back to
       // the canonical lb storage, same as the lift-weight field.
-      await AppServices.bodyweight
-          .insert(BodyweightEntry(date: dateStr, weight: Units.toLb(entered)));
+      final entry =
+          BodyweightEntry(id: widget.editingId, date: dateStr, weight: Units.toLb(entered));
+      if (_isEditing) {
+        await AppServices.bodyweight.update(entry);
+      } else {
+        await AppServices.bodyweight.insert(entry);
+      }
     } else {
       final type = switch (widget.kind) {
         SimpleMetricKind.sleep => MetricType.sleepHours,
         SimpleMetricKind.steps => MetricType.steps,
         SimpleMetricKind.bodyweight => throw StateError('unreachable'),
       };
-      await AppServices.metrics.insert(MetricEntry(
+      final entry = MetricEntry(
+        id: widget.editingId,
         date: dateStr,
         metricType: type,
         value: entered,
-        loggedAt: DateTime.now().toIso8601String(),
-      ));
+        loggedAt: widget.initialLoggedAt ?? DateTime.now().toIso8601String(),
+      );
+      if (_isEditing) {
+        await AppServices.metrics.update(entry);
+      } else {
+        await AppServices.metrics.insert(entry);
+      }
     }
     AppServices.signalReload();
     if (mounted) Navigator.pop(context);

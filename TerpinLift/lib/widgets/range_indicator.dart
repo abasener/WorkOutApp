@@ -17,11 +17,16 @@ class RangeIndicator extends StatelessWidget {
   final double goal;
   final double high;
 
+  /// Defaults to unit-aware weight formatting; pass an override (e.g. a
+  /// rep-count formatter) for exercises where the plotted values aren't lb.
+  final String Function(double)? formatValue;
+
   const RangeIndicator({
     super.key,
     required this.low,
     required this.goal,
     required this.high,
+    this.formatValue,
   });
 
   /// Fraction of the low-high span added as empty margin on each side.
@@ -29,6 +34,7 @@ class RangeIndicator extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final format = formatValue ?? Units.format;
     final span = (high - low).abs() < 1e-9 ? 1.0 : (high - low);
     final pad = span * _breathingRoom;
     final domainMin = low - pad;
@@ -62,9 +68,9 @@ class RangeIndicator extends StatelessWidget {
               child: Stack(
                 clipBehavior: Clip.none,
                 children: [
-                  _alignedLabel(xOf(low), Units.format(low), AppText.smallText),
-                  _alignedLabel(xOf(goal), Units.format(goal), AppText.subHeader),
-                  _alignedLabel(xOf(high), Units.format(high), AppText.smallText),
+                  _alignedLabel(xOf(low), format(low), AppText.smallText),
+                  _alignedLabel(xOf(goal), format(goal), AppText.subHeader),
+                  _alignedLabel(xOf(high), format(high), AppText.smallText),
                 ],
               ),
             ),

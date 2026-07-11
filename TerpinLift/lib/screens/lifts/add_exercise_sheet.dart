@@ -24,6 +24,12 @@ class _AddExerciseSheetState extends State<AddExerciseSheet> {
   late final Set<ExerciseCategory> _categories = {
     ...?widget.existing?.categories,
   };
+  late final Set<ExerciseType> _equipmentTags = {
+    ...?widget.existing?.equipmentTags,
+  };
+  late final Set<MovementPattern> _patterns = {
+    ...?widget.existing?.patterns,
+  };
   bool _saving = false;
 
   bool get _isEditing => widget.existing != null;
@@ -55,6 +61,8 @@ class _AddExerciseSheetState extends State<AddExerciseSheet> {
       await AppServices.exercises.update(widget.existing!.copyWith(
         name: _nameController.text.trim(),
         categories: _categories.toList(),
+        equipmentTags: _equipmentTags.toList(),
+        patterns: _patterns.toList(),
         youtubeUrl: youtubeUrl,
       ));
     } else {
@@ -62,6 +70,8 @@ class _AddExerciseSheetState extends State<AddExerciseSheet> {
       await AppServices.exercises.insert(Exercise(
         name: _nameController.text.trim(),
         categories: _categories.toList(),
+        equipmentTags: _equipmentTags.toList(),
+        patterns: _patterns.toList(),
         isSeeded: false,
         youtubeUrl: youtubeUrl,
         created: today,
@@ -150,6 +160,56 @@ class _AddExerciseSheetState extends State<AddExerciseSheet> {
                     selected: selected,
                     onSelected: (v) => setState(
                         () => v ? _categories.add(c) : _categories.remove(c)),
+                    backgroundColor: AppColors.surface,
+                    selectedColor: AppColors.accentDim,
+                    labelStyle: TextStyle(
+                        color: selected ? AppColors.accent : AppColors.textSecondary),
+                    side: BorderSide(
+                        color: selected ? AppColors.accent : AppColors.border),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: AppSpacing.standard),
+              Text('Equipment/type (optional)', style: AppText.label),
+              const SizedBox(height: AppSpacing.standard),
+              Wrap(
+                spacing: AppSpacing.small,
+                runSpacing: AppSpacing.small,
+                children: ExerciseType.values.map((t) {
+                  final selected = _equipmentTags.contains(t);
+                  return FilterChip(
+                    label: Text(t.label),
+                    selected: selected,
+                    onSelected: (v) => setState(
+                        () => v ? _equipmentTags.add(t) : _equipmentTags.remove(t)),
+                    backgroundColor: AppColors.surface,
+                    selectedColor: AppColors.accentDim,
+                    labelStyle: TextStyle(
+                        color: selected ? AppColors.accent : AppColors.textSecondary),
+                    side: BorderSide(
+                        color: selected ? AppColors.accent : AppColors.border),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: AppSpacing.standard),
+              Text('Movement pattern (optional)', style: AppText.label),
+              const SizedBox(height: AppSpacing.small),
+              Text(
+                'Powers the Workout Planner\'s pattern-pool browsing — most exercises '
+                'only need one.',
+                style: AppText.smallText,
+              ),
+              const SizedBox(height: AppSpacing.standard),
+              Wrap(
+                spacing: AppSpacing.small,
+                runSpacing: AppSpacing.small,
+                children: MovementPattern.values.map((p) {
+                  final selected = _patterns.contains(p);
+                  return FilterChip(
+                    label: Text(p.label),
+                    selected: selected,
+                    onSelected: (v) =>
+                        setState(() => v ? _patterns.add(p) : _patterns.remove(p)),
                     backgroundColor: AppColors.surface,
                     selectedColor: AppColors.accentDim,
                     labelStyle: TextStyle(

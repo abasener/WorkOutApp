@@ -4,6 +4,7 @@ import '../../data/models/exercise.dart';
 import '../../data/models/lift_set.dart';
 import '../../data/repositories/lift_repository.dart';
 import '../../services/app_services.dart';
+import '../../services/effort_display.dart';
 import '../../services/units.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/date_picker_field.dart';
@@ -225,14 +226,18 @@ class _EditLiftSessionFormState extends State<EditLiftSessionForm> {
           Expanded(
             child: TextFormField(
               key: ValueKey('rpe_$i'),
-              initialValue: set.rpe?.toString() ?? '',
+              initialValue:
+                  set.rpe != null ? EffortDisplay.toDisplay(set.rpe!).toStringAsFixed(0) : '',
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
               style: AppText.bodyText,
               decoration: InputDecoration(
-                labelText: 'RPE',
-                suffixIcon: const InfoTooltip(glossaryKey: 'rpe', title: 'RPE'),
+                labelText: 'Reps left',
+                suffixIcon: const InfoTooltip(glossaryKey: 'rpe', title: 'Reps left'),
               ),
-              onChanged: (v) => set.rpe = double.tryParse(v),
+              onChanged: (v) {
+                final entered = double.tryParse(v);
+                set.rpe = entered == null ? null : EffortDisplay.fromDisplay(entered);
+              },
             ),
           ),
         ],

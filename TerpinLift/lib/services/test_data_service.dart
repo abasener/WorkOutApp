@@ -20,6 +20,10 @@ class TestDataService {
     'Bench Press': 95,
     'Deadlift': 155,
     'Overhead Press': 65,
+    'Barbell Row': 85,
+    'Lat Pulldown': 90,
+    'Leg Press': 220,
+    'Barbell Curl': 45,
   };
 
   // Two rough cycles over the 60-day window, ~28 days apart. A period is
@@ -44,9 +48,31 @@ class TestDataService {
   /// Wipes all existing data (including exercises) and inserts synthetic
   /// history for every tracked thing: lifts, bodyweight, steps, sleep,
   /// per-region soreness, and cycle entries.
+  /// A representative training-routine subset to actually generate sessions
+  /// for — the full seeded library is ~75 exercises now (`DatabaseHelper.
+  /// _seedExercises`), and rotating synthetic sessions across all of them
+  /// would spread the 60-day window too thin for any single lift's trend
+  /// chart to have enough points to look like anything. The untouched
+  /// exercises still exist and are browsable, just without demo history.
+  static const _routineExerciseNames = [
+    'Back Squat',
+    'Front Squat',
+    'Bench Press',
+    'Deadlift',
+    'Overhead Press',
+    'Pull Up',
+    'Push Up',
+    'Barbell Row',
+    'Lat Pulldown',
+    'Leg Press',
+    'Barbell Curl',
+  ];
+
   static Future<void> load() async {
     await AppServices.db.wipeEverythingAndReseed();
-    final exercises = await AppServices.exercises.getAll();
+    final allExercises = await AppServices.exercises.getAll();
+    final exercises =
+        allExercises.where((e) => _routineExerciseNames.contains(e.name)).toList();
 
     const totalDays = 60;
     final today = DateTime.now();
@@ -99,12 +125,7 @@ class TestDataService {
 
       if (isGymDay) {
         final primary = exercises[offset % exercises.length];
-        await _logLift(
-          primary,
-          progress,
-          amplitudeByExercise[primary.id]!,
-          dateStr,
-        );
+        await _logAny(primary, progress, amplitudeByExercise[primary.id]!, dateStr);
         for (final tag in primary.categories
             .where(TrainingCompositionService.bodyPartCategories.contains)) {
           sorenessEvents.add((day: offset, category: tag, magnitude: 3.5));
@@ -115,7 +136,7 @@ class TestDataService {
         if (_rand.nextDouble() < 0.4) {
           final secondary = exercises[(offset + 2) % exercises.length];
           if (secondary.id != primary.id) {
-            await _logLift(
+            await _logAny(
               secondary,
               progress,
               amplitudeByExercise[secondary.id]!,
@@ -178,11 +199,113 @@ class TestDataService {
     for (final entry in raw.entries) {
       await AppServices.metrics.insert(MetricEntry(
         date: dateStr,
-        metricType: MetricTypeKey.forSorenessCategory(entry.key),
+        metricType: MetricTypeKey.forSorenessRegion(_representativeRegion(entry.key)),
         value: entry.value.round().clamp(0, 5).toDouble(),
         loggedAt: loggedAt,
       ));
     }
+  }
+
+  /// Synthetic soreness doesn't need per-exercise sub-region precision —
+  /// one representative `SorenessRegion` per broad category is enough to
+  /// give the demo data plausible shape after the soreness sub-split
+  /// (designFiles/05_SCREEN_metrics.md).
+  static SorenessRegion _representativeRegion(ExerciseCategory category) {
+    switch (category) {
+      case ExerciseCategory.chest:
+        return SorenessRegion.chest;
+      case ExerciseCategory.core:
+        return SorenessRegion.coreCenter;
+      case ExerciseCategory.back:
+        return SorenessRegion.upperBack;
+      case ExerciseCategory.arms:
+        return SorenessRegion.biceps;
+      case ExerciseCategory.legs:
+        return SorenessRegion.quads;
+      case ExerciseCategory.push:
+      case ExerciseCategory.pull:
+        return SorenessRegion.chest; // unreachable: bodyPartCategories excludes these
+    }
+  }
+
+  /// Dispatches to the bodyweight-narrative generator for `Pull Up`/`Push Up`
+  /// (weight-as-lb progression doesn't make sense for those), plain
+  /// weight-based generation for everything else.
+  static Future<void> _logAny(
+    Exercise exercise,
+    double progress,
+    double amplitude,
+    String dateStr, {
+    bool forceRecovery = false,
+  }) async {
+    if (exercise.equipmentTags.contains(ExerciseType.bodyweight)) {
+      await _logBodyweightLift(exercise, progress, dateStr);
+    } else {
+      await _logLift(exercise, progress, amplitude, dateStr, forceRecovery: forceRecovery);
+    }
+  }
+
+  /// Bodyweight narrative: `Pull Up` walks the assisted -> plain-bodyweight
+  /// -> weighted arc the Goal-gauge rep-standards feature was built to show
+  /// off; `Push Up` stays a simpler plain-bodyweight rep climb the whole
+  /// window, since push-ups don't typically have an assisted phase. `weight`
+  /// here is the signed added/assisted load (see `bodyweightAdjustedBestE1rm`),
+  /// not a total — reps are the thing actually progressing.
+  static Future<void> _logBodyweightLift(
+    Exercise exercise,
+    double progress,
+    String dateStr,
+  ) async {
+    List<LiftSet> sets;
+    if (exercise.name == 'Pull Up') {
+      if (progress < 0.35) {
+        final t = progress / 0.35;
+        final assistance = 55 - t * 25; // 55lb assist tapering to 30lb
+        sets = _buildBodyweightSets(
+            weight: -assistance, repsMin: 5, repsMax: 8, rpeMin: 6, rpeMax: 8);
+      } else if (progress < 0.65) {
+        final t = (progress - 0.35) / 0.30;
+        final repsCenter = (4 + t * 8).round(); // 4 -> 12 plain-bodyweight reps
+        sets = _buildBodyweightSets(
+          weight: 0,
+          repsMin: (repsCenter - 1).clamp(1, 99),
+          repsMax: repsCenter + 1,
+          rpeMin: 7,
+          rpeMax: 9,
+        );
+      } else {
+        final t = (progress - 0.65) / 0.35;
+        final added = (5 + t * 20).roundToDouble(); // 5lb -> 25lb added
+        sets = _buildBodyweightSets(
+            weight: added, repsMin: 4, repsMax: 7, rpeMin: 7, rpeMax: 9);
+      }
+    } else {
+      // Push Up: plain-bodyweight reps climbing the whole window.
+      final repsCenter = (8 + progress * 24).round(); // 8 -> 32
+      sets = _buildBodyweightSets(
+        weight: 0,
+        repsMin: (repsCenter - 3).clamp(1, 99),
+        repsMax: repsCenter + 3,
+        rpeMin: 6,
+        rpeMax: 9,
+      );
+    }
+    await AppServices.lifts.logSession(exerciseId: exercise.id!, date: dateStr, sets: sets);
+  }
+
+  static List<LiftSet> _buildBodyweightSets({
+    required double weight,
+    required int repsMin,
+    required int repsMax,
+    required int rpeMin,
+    required int rpeMax,
+  }) {
+    final setCount = 3 + _rand.nextInt(2); // 3-4 sets
+    return List.generate(setCount, (_) {
+      final reps = repsMin + _rand.nextInt((repsMax - repsMin + 1).clamp(1, 999));
+      final rpe = (rpeMin + _rand.nextInt(rpeMax - rpeMin + 1)).toDouble();
+      return LiftSet(sessionId: 0, setNumber: 0, reps: reps, weight: weight, rpe: rpe);
+    });
   }
 
   static Future<void> _logLift(

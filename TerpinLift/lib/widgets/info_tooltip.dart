@@ -7,9 +7,10 @@ import '../theme/app_theme.dart';
 class Glossary {
   static const Map<String, String> _entries = {
     'rpe':
-        "How hard that set felt, 1-10. 10 = you couldn't have done another rep. "
-            "7 = you probably had about 3 more reps in you. Lower numbers = an "
-            "easier/recovery-style set. This isn't about pain, just effort.",
+        "Roughly how many reps you had left in the tank on that set, 1-10. "
+            "1 = basically to failure, couldn't do another. 10 = easy, you could've "
+            "kept going for a while. This isn't about pain, just how close to your "
+            "limit you were.",
     'soreness':
         'How sore an area is right now, on a 0-5 scale, independent of any '
             'specific lift. Used to judge recovery, not to compare against a '
@@ -36,6 +37,14 @@ class Glossary {
             "bracket. These are directional, generalized figures — not a "
             "personally measured standard — meant to help guide steady "
             "progress, not to say what you should be able to lift.",
+    'strength_goal_bodyweight':
+        'A long-term target based on your best plain-bodyweight rep count '
+            '(no assistance, no added weight) against commonly cited rep-count '
+            'standards for this movement, adjusted for gender and a broad age '
+            "bracket. Assisted or weighted sets still count toward your "
+            "Predicted Next range above, just not this rep-standard ladder — "
+            "it's meant to stay comparable to the published numbers it's "
+            "based on.",
   };
 
   static String textFor(String key) =>

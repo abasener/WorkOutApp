@@ -5,6 +5,8 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../data/models/exercise.dart';
 import '../../data/repositories/lift_repository.dart';
 import '../../services/app_services.dart';
+import '../../services/bodyweight_rep_standards.dart';
+import '../../services/effort_display.dart';
 import '../../services/muscle_map.dart';
 import '../../services/readiness_engine.dart';
 import '../../services/strength_standards.dart';
@@ -18,6 +20,7 @@ import '../../widgets/labeled_trend_chart.dart';
 import '../../widgets/range_indicator.dart';
 import '../../widgets/readiness_segmented_bar.dart';
 import '../../widgets/strength_goal_gauge.dart';
+import '../quick_log/log_lift_form.dart';
 import 'add_exercise_sheet.dart';
 import 'edit_lift_session_form.dart';
 
@@ -78,6 +81,22 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
     if (deleted == true && mounted) Navigator.pop(context);
   }
 
+  Future<void> _logSet() async {
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => LogLiftForm(preselected: _exercise),
+    );
+  }
+
+  Future<void> _togglePinned() async {
+    final updated = _exercise.copyWith(pinned: !_exercise.pinned);
+    await AppServices.exercises.update(updated);
+    setState(() => _exercise = updated);
+    AppServices.signalReload();
+  }
+
   Future<void> _editSession(SessionWithSets session) async {
     await showModalBottomSheet(
       context: context,
@@ -99,10 +118,24 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
       );
     }
 
-    final prediction = TrendEngine.predictNextE1rm(_sessions);
+    // Bodyweight-tagged lifts (pull-ups, push-ups, ...) store `weight` as
+    // added/assisted load, not total load — Epley breaks down at 0/negative
+    // weight, so these use `bodyweightAdjustedBestE1rm` (bodyweight + added
+    // load) wherever "e1RM" is computed, and the Goal gauge switches to a
+    // rep-count standards table instead of a bodyweight-ratio one. See
+    // designFiles/07_SMART_TRENDS.md.
+    final isBodyweightLift = _exercise.equipmentTags.contains(ExerciseType.bodyweight);
+    final useBodyweightE1rm = isBodyweightLift && _bodyweightLb != null;
+    double e1rmValueOf(SessionWithSets s) =>
+        useBodyweightE1rm ? s.bodyweightAdjustedBestE1rm(_bodyweightLb!) : s.bestE1rm;
+
+    final prediction = TrendEngine.predictNextE1rm(
+      _sessions,
+      valueOf: useBodyweightE1rm ? e1rmValueOf : null,
+    );
     // Full history here — no 6-month cap, unlike the Home/Metrics dashboards.
     final e1rmPoints = _sessions.reversed
-        .map((s) => ChartPoint(DateTime.parse(s.session.date), s.bestE1rm))
+        .map((s) => ChartPoint(DateTime.parse(s.session.date), e1rmValueOf(s)))
         .where((p) => p.value > 0)
         .toList();
     final daysSince = TrendEngine.daysSinceLastTrained(_sessions);
@@ -113,15 +146,32 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
         ReadinessEngine.readinessForExercise(_exercise, _muscleReadiness));
     final overview = MuscleMap.liftOverview[_exercise.name];
 
-    final sessionsWithE1rm = _sessions.where((s) => s.bestE1rm > 0).toList();
+    // Predicted Next, converted to a rep range at the load the lift was most
+    // recently trained at ("try for this next, at whatever load you're
+    // currently using") — a different axis from the Goal gauge below, which
+    // is deliberately pinned to plain-bodyweight reps to stay comparable to
+    // published standards.
+    (double, double, double)? repsPrediction;
+    if (useBodyweightE1rm && prediction != null) {
+      final recentWithSets = _sessions.where((s) => s.sets.isNotEmpty);
+      final lastSession = recentWithSets.isEmpty ? null : recentWithSets.first;
+      final lastAddedWeight = (lastSession == null || lastSession.sets.isEmpty)
+          ? 0.0
+          : lastSession.sets.map((s) => s.weight).reduce((a, b) => a > b ? a : b);
+      final refLoad = (_bodyweightLb! + lastAddedWeight).clamp(1.0, double.infinity);
+      double toReps(double value) => (30 * (value / refLoad - 1)).clamp(0.0, double.infinity);
+      repsPrediction = (toReps(prediction.$1), toReps(prediction.$2), toReps(prediction.$3));
+    }
+
+    final sessionsWithE1rm = _sessions.where((s) => e1rmValueOf(s) > 0).toList();
     SessionWithSets? bestSession;
     for (final s in sessionsWithE1rm) {
-      if (bestSession == null || s.bestE1rm > bestSession.bestE1rm) bestSession = s;
+      if (bestSession == null || e1rmValueOf(s) > e1rmValueOf(bestSession)) bestSession = s;
     }
     final prBestE1rm = bestSession == null
         ? null
         : StrengthStandards.effectiveBestE1rm(
-            bestSession.bestE1rm,
+            e1rmValueOf(bestSession),
             DateTime.parse(bestSession.session.date),
             DateTime.now(),
           );
@@ -134,11 +184,58 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
           )
         : null;
 
+    // Goal gauge's rep-count side: pinned to plain-bodyweight sets only
+    // (added load == 0), since published pull-up/push-up standards assume
+    // unassisted, unweighted reps — a weighted or assisted PR isn't
+    // comparable to that table.
+    final repStandardTargets = BodyweightRepStandards.hasStandard(_exercise.name)
+        ? BodyweightRepStandards.allTargets(
+            exerciseName: _exercise.name,
+            gender: UserProfile.gender,
+            ageBucket: UserProfile.ageBucket,
+          )
+        : null;
+    SessionWithSets? bestBodyweightRepSession;
+    int bestBodyweightReps = 0;
+    for (final s in _sessions) {
+      for (final set in s.sets) {
+        if (set.weight == 0 && set.reps > bestBodyweightReps) {
+          bestBodyweightReps = set.reps;
+          bestBodyweightRepSession = s;
+        }
+      }
+    }
+    final prBestReps = bestBodyweightRepSession == null
+        ? null
+        : StrengthStandards.effectiveBestE1rm(
+            bestBodyweightReps.toDouble(),
+            DateTime.parse(bestBodyweightRepSession.session.date),
+            DateTime.now(),
+          );
+
+    final goalTierTargets = isBodyweightLift ? repStandardTargets : tierTargets;
+    final goalCurrentValue = isBodyweightLift ? prBestReps : prBestE1rm;
+    String Function(double)? goalFormatValue;
+    if (isBodyweightLift) {
+      goalFormatValue = (v) => '${v.round()} reps';
+    }
+
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
         title: Text(_exercise.name),
         actions: [
+          IconButton(
+            icon: Icon(_exercise.pinned ? Icons.push_pin : Icons.push_pin_outlined),
+            color: _exercise.pinned ? AppColors.accent : null,
+            tooltip: _exercise.pinned ? 'Unpin' : 'Pin — shows in the quick-log dropdown',
+            onPressed: _togglePinned,
+          ),
+          IconButton(
+            icon: const Icon(Icons.add),
+            tooltip: 'Log a set',
+            onPressed: _logSet,
+          ),
           IconButton(
             icon: const Icon(Icons.edit_outlined),
             tooltip: 'Edit movement',
@@ -217,15 +314,26 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
                 children: [
                   Row(
                     children: [
-                      Text('Predicted Next e1RM Range', style: AppText.label),
-                      const InfoTooltip(glossaryKey: 'e1rm', title: 'Predicted Next e1RM Range'),
+                      Text(
+                        repsPrediction != null
+                            ? 'Predicted Next Rep Range'
+                            : 'Predicted Next e1RM Range',
+                        style: AppText.label,
+                      ),
+                      InfoTooltip(
+                        glossaryKey: 'e1rm',
+                        title: repsPrediction != null
+                            ? 'Predicted Next Rep Range'
+                            : 'Predicted Next e1RM Range',
+                      ),
                     ],
                   ),
                   const SizedBox(height: AppSpacing.standard),
                   RangeIndicator(
-                    low: prediction.$1,
-                    goal: prediction.$2,
-                    high: prediction.$3,
+                    low: repsPrediction?.$1 ?? prediction.$1,
+                    goal: repsPrediction?.$2 ?? prediction.$2,
+                    high: repsPrediction?.$3 ?? prediction.$3,
+                    formatValue: repsPrediction != null ? (v) => '${v.round()} reps' : null,
                   ),
                 ],
               ),
@@ -331,21 +439,26 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
               points: e1rmPoints,
               showPrediction: true,
               trendStyle: TrendStyle.polynomial,
+              yLabelFormatter: (v) => Units.format(v),
             ),
           ),
-          if (tierTargets != null && prBestE1rm != null) ...[
+          if (goalTierTargets != null && goalCurrentValue != null) ...[
             const SizedBox(height: AppSpacing.large),
             Row(
               children: [
                 Text('Goal', style: AppText.subHeader),
-                const InfoTooltip(glossaryKey: 'strength_goal', title: 'Goal'),
+                InfoTooltip(
+                  glossaryKey: isBodyweightLift ? 'strength_goal_bodyweight' : 'strength_goal',
+                  title: 'Goal',
+                ),
               ],
             ),
             const SizedBox(height: AppSpacing.standard),
             AppCard(
               child: StrengthGoalGauge(
-                tierTargets: tierTargets,
-                currentE1rm: prBestE1rm,
+                tierTargets: goalTierTargets,
+                currentE1rm: goalCurrentValue,
+                formatValue: goalFormatValue,
               ),
             ),
           ],
@@ -377,7 +490,7 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
                               padding: const EdgeInsets.symmetric(vertical: 2),
                               child: Text(
                                 'Set ${set.setNumber}: ${set.reps} reps @ ${Units.format(set.weight)}'
-                                '${set.rpe != null ? ' · RPE ${set.rpe!.toStringAsFixed(1)}' : ''}',
+                                '${set.rpe != null ? ' · ${EffortDisplay.toDisplay(set.rpe!).toStringAsFixed(0)} reps left' : ''}',
                                 style: AppText.smallText,
                               ),
                             )),

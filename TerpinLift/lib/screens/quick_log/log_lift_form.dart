@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../data/models/exercise.dart';
 import '../../data/models/lift_set.dart';
 import '../../services/app_services.dart';
+import '../../services/effort_display.dart';
 import '../../services/units.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/date_picker_field.dart';
@@ -16,7 +17,8 @@ class _PendingSet {
 }
 
 class LogLiftForm extends StatefulWidget {
-  const LogLiftForm({super.key});
+  final Exercise? preselected;
+  const LogLiftForm({super.key, this.preselected});
 
   @override
   State<LogLiftForm> createState() => _LogLiftFormState();
@@ -51,11 +53,24 @@ class _LogLiftFormState extends State<LogLiftForm> {
   }
 
   Future<void> _loadExercises() async {
-    final exercises = await AppServices.exercises.getAll();
+    final all = await AppServices.exercises.getAll();
+    // Only pinned exercises clutter this dropdown much less now that the
+    // library is ~75 lifts — anything off the beaten path is reachable via
+    // the Lifts list + that lift's own "+" button instead. Always include
+    // `preselected` even if unpinned, so opening this form from a specific
+    // lift's detail page never shows a dropdown missing its own exercise.
+    final pinned = all.where((e) => e.pinned).toList();
+    final exercises = widget.preselected != null &&
+            !pinned.any((e) => e.id == widget.preselected!.id)
+        ? [widget.preselected!, ...pinned]
+        : pinned;
     if (!mounted) return;
     setState(() {
       _exercises = exercises;
-      _selected = exercises.isNotEmpty ? exercises.first : null;
+      _selected = widget.preselected != null &&
+              exercises.any((e) => e.id == widget.preselected!.id)
+          ? exercises.firstWhere((e) => e.id == widget.preselected!.id)
+          : (exercises.isNotEmpty ? exercises.first : null);
       _loading = false;
     });
   }
@@ -134,7 +149,10 @@ class _LogLiftFormState extends State<LogLiftForm> {
                     ),
                     const SizedBox(height: AppSpacing.standard),
                     if (_exercises.isEmpty)
-                      Text('Add an exercise on the Lifts tab first.',
+                      Text(
+                          'No pinned lifts yet — pin one from its detail page '
+                          '(the push-pin icon), or open it from the Lifts tab '
+                          'and log a set directly from there.',
                           style: AppText.smallText)
                     else ...[
                       DropdownButtonFormField<Exercise>(
@@ -236,14 +254,18 @@ class _LogLiftFormState extends State<LogLiftForm> {
           Expanded(
             child: TextFormField(
               key: ValueKey('rpe_$i'),
-              initialValue: set.rpe?.toString() ?? '',
+              initialValue:
+                  set.rpe != null ? EffortDisplay.toDisplay(set.rpe!).toStringAsFixed(0) : '',
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
               style: AppText.bodyText,
               decoration: InputDecoration(
-                labelText: 'RPE',
-                suffixIcon: const InfoTooltip(glossaryKey: 'rpe', title: 'RPE'),
+                labelText: 'Reps left',
+                suffixIcon: const InfoTooltip(glossaryKey: 'rpe', title: 'Reps left'),
               ),
-              onChanged: (v) => set.rpe = double.tryParse(v),
+              onChanged: (v) {
+                final entered = double.tryParse(v);
+                set.rpe = entered == null ? null : EffortDisplay.fromDisplay(entered);
+              },
             ),
           ),
         ],

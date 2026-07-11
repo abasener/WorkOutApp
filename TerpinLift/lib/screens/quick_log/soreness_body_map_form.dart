@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_body_heatmap/flutter_body_heatmap.dart';
 
-import '../../data/models/exercise.dart';
 import '../../data/models/metric_entry.dart';
 import '../../services/app_services.dart';
 import '../../services/muscle_map.dart';
@@ -10,20 +9,22 @@ import '../../widgets/date_picker_field.dart';
 import '../../widgets/flame_level_picker.dart';
 
 /// Tap-to-log soreness: tap a body region on the heatmap, pick a 0-5 flame
-/// level for that broad category (core/back/arms/legs/chest), save. Replaces
-/// the old single generic 1-10 soreness number — see
-/// designFiles/00_UX_DESIGN.md for the reasoning (coarser scale, no keyboard,
-/// per-body-part granularity feeding future readiness scoring).
+/// level for that sub-region (e.g. quads/hamstrings/glutes, not just one
+/// "legs" bucket), save. See designFiles/05_SCREEN_metrics.md "Soreness
+/// sub-splitting" for why this is finer than the original 5 broad
+/// categories, and designFiles/00_UX_DESIGN.md for the original body-map
+/// interaction reasoning (coarser scale, no keyboard).
 class SorenessBodyMapForm extends StatefulWidget {
-  const SorenessBodyMapForm({super.key});
+  final DateTime? initialDate;
+  const SorenessBodyMapForm({super.key, this.initialDate});
 
   @override
   State<SorenessBodyMapForm> createState() => _SorenessBodyMapFormState();
 }
 
 class _SorenessBodyMapFormState extends State<SorenessBodyMapForm> {
-  DateTime _date = DateTime.now();
-  final Map<ExerciseCategory, int> _levels = {};
+  late DateTime _date = widget.initialDate ?? DateTime.now();
+  final Map<SorenessRegion, int> _levels = {};
   bool _loading = true;
 
   @override
@@ -36,11 +37,11 @@ class _SorenessBodyMapFormState extends State<SorenessBodyMapForm> {
 
   Future<void> _loadForDate() async {
     setState(() => _loading = true);
-    final levels = <ExerciseCategory, int>{};
-    for (final category in MuscleMap.broadGroups.keys) {
-      final type = MetricTypeKey.forSorenessCategory(category);
+    final levels = <SorenessRegion, int>{};
+    for (final region in MuscleMap.sorenessRegionGroups.keys) {
+      final type = MetricTypeKey.forSorenessRegion(region);
       final entries = await AppServices.metrics.getByTypeAndDate(type, _dateStr);
-      if (entries.isNotEmpty) levels[category] = entries.first.value.round();
+      if (entries.isNotEmpty) levels[region] = entries.first.value.round();
     }
     if (!mounted) return;
     setState(() {
@@ -52,17 +53,17 @@ class _SorenessBodyMapFormState extends State<SorenessBodyMapForm> {
   }
 
   Future<void> _onMuscleTap(Muscle muscle, MuscleSide side) async {
-    final category = MuscleMap.categoryForMuscle(muscle);
-    if (category == null) return; // untracked region (neck/head/hair/hands)
+    final region = MuscleMap.regionForMuscle(muscle);
+    if (region == null) return; // untracked region (neck/head/hair/hands)
 
     final level = await showDialog<int>(
       context: context,
       builder: (ctx) {
-        var selected = _levels[category] ?? 0;
+        var selected = _levels[region] ?? 0;
         return StatefulBuilder(
           builder: (ctx, setDialogState) => AlertDialog(
             backgroundColor: AppColors.surfaceRaised,
-            title: Text(category.label, style: AppText.subHeader),
+            title: Text(region.label, style: AppText.subHeader),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -90,7 +91,7 @@ class _SorenessBodyMapFormState extends State<SorenessBodyMapForm> {
     );
     if (level == null) return;
 
-    final type = MetricTypeKey.forSorenessCategory(category);
+    final type = MetricTypeKey.forSorenessRegion(region);
     await AppServices.metrics.insert(MetricEntry(
       date: _dateStr,
       metricType: type,
@@ -99,14 +100,14 @@ class _SorenessBodyMapFormState extends State<SorenessBodyMapForm> {
     ));
     AppServices.signalReload();
     if (!mounted) return;
-    setState(() => _levels[category] = level);
+    setState(() => _levels[region] = level);
   }
 
   @override
   Widget build(BuildContext context) {
     final data = <Muscle, MuscleData>{
       for (final entry in _levels.entries)
-        for (final muscle in MuscleMap.broadGroups[entry.key] ?? const <Muscle>[])
+        for (final muscle in MuscleMap.sorenessRegionGroups[entry.key] ?? const <Muscle>[])
           muscle: MuscleData(intensity: entry.value / 5.0),
     };
 

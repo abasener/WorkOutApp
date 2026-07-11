@@ -21,20 +21,6 @@ extension LiftIntensityLabel on LiftIntensity {
 /// workout-selection logic. This only judges recency and predicts a number;
 /// it never picks exercises for the user.
 class TrendEngine {
-  /// Simple day-count status message for a lift, based on days since last session.
-  static String? recencyFlag(List<SessionWithSets> sessions, String exerciseName) {
-    if (sessions.isEmpty) return null;
-    final days = daysSinceLastTrained(sessions);
-    if (days == null) return null;
-    if (days >= 6) {
-      return '$exerciseName hasn\'t been trained in $days days — looks primed.';
-    }
-    if (days <= 1) {
-      return '$exerciseName was just trained — likely still recovering.';
-    }
-    return null;
-  }
-
   /// Days since the most recent logged session, or null if never trained.
   static int? daysSinceLastTrained(List<SessionWithSets> sessions) {
     if (sessions.isEmpty) return null;
@@ -73,24 +59,35 @@ class TrendEngine {
   /// this answers "what should I aim for over time," Primed for Growth
   /// answers "how do I look today"). A navigation aid toward a sensible next
   /// PR, not a coach claiming to know what you'll hit on any given day.
+  /// [valueOf] overrides what "e1RM" means per session — defaults to plain
+  /// weight-based `bestE1rm`; pass `SessionWithSets.bodyweightAdjustedBestE1rm`
+  /// (bound to a bodyweight) for bodyweight-tagged exercises, since their
+  /// `weight` field is only the added/assisted load, not the total load
+  /// moved. [band] is the fixed +/- width around the goal — lb for a normal
+  /// lift, left as a caller-supplied value here since a bodyweight lift's
+  /// caller converts the whole result to reps afterward anyway.
   static (double low, double goal, double high)? predictNextE1rm(
-    List<SessionWithSets> sessions,
-  ) {
+    List<SessionWithSets> sessions, {
+    double Function(SessionWithSets)? valueOf,
+    double band = 50.0,
+  }) {
+    final e1rmOf = valueOf ?? (s) => s.bestE1rm;
     final withSets = sessions.where((s) => s.sets.isNotEmpty).toList();
     if (withSets.isEmpty) return null;
 
     // Recent window for the rolling trend (most recent 5 sessions).
     final recent = withSets.take(5).toList();
-    final e1rms = recent.map((s) => s.bestE1rm).toList();
+    final e1rms = recent.map(e1rmOf).toList();
     final avgE1rm = e1rms.reduce((a, b) => a + b) / e1rms.length;
 
     final lastSession = recent.first;
+    final lastE1rm = e1rmOf(lastSession);
     final avgRpe = _averageRpe(lastSession.sets);
 
     // RPE-weighted confidence: near-max effort -> trust the last session's
     // number more; low effort -> lean on the rolling average instead.
     final rpeWeight = avgRpe == null ? 0.5 : (avgRpe / 10).clamp(0.2, 1.0);
-    final blended = (lastSession.bestE1rm * rpeWeight) + (avgE1rm * (1 - rpeWeight));
+    final blended = (lastE1rm * rpeWeight) + (avgE1rm * (1 - rpeWeight));
 
     // Scale the suggested overload step by the recent trend direction —
     // same slump-detection comparison `ReadinessEngine.overloadTrendFactor`
@@ -103,11 +100,11 @@ class TrendEngine {
     var overloadStep = 1.015; // default: modest nudge when the trend is flat
     if (priorWindow.isNotEmpty) {
       final priorAvgE1rm =
-          priorWindow.map((s) => s.bestE1rm).reduce((a, b) => a + b) / priorWindow.length;
+          priorWindow.map(e1rmOf).reduce((a, b) => a + b) / priorWindow.length;
       if (priorAvgE1rm > 0) {
-        if (lastSession.bestE1rm < priorAvgE1rm * 0.95) {
+        if (lastE1rm < priorAvgE1rm * 0.95) {
           overloadStep = 1.0; // emerging slump -> consolidate, don't chase a new number
-        } else if (lastSession.bestE1rm > priorAvgE1rm * 1.02) {
+        } else if (lastE1rm > priorAvgE1rm * 1.02) {
           overloadStep = 1.03; // clearly trending up -> a bigger ask is reasonable
         }
       }
@@ -115,7 +112,6 @@ class TrendEngine {
 
     final goal = blended * overloadStep;
 
-    const band = 50.0;
     return (goal - band, goal, goal + band);
   }
 

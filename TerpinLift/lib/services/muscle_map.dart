@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_body_heatmap/flutter_body_heatmap.dart';
 
 import '../data/models/exercise.dart';
+import '../data/models/metric_entry.dart';
 
 /// What kind of quick reminder a [LiftCue] is — drives which icon it gets.
 /// Deliberately just 3 kinds: this is meant to read like what a coach says
@@ -74,6 +75,39 @@ abstract class MuscleMap {
     return null;
   }
 
+  /// Soreness sub-region -> specific muscles, finer than [broadGroups] —
+  /// used for soreness *logging* specifically (`SorenessBodyMapForm`, the
+  /// Metrics soreness preview, and `ReadinessEngine`'s soreness proxy).
+  /// [broadGroups]/[categoryForMuscle] stay as-is for everything else
+  /// (Training Composition, the Home status icons' recovery-window
+  /// averaging) — this is a parallel, finer split just for soreness, not a
+  /// replacement. Minor joint-adjacent regions (knees, tibialis, ankles,
+  /// feet) fold into the nearest major region (quads/calves) rather than
+  /// getting their own tap target.
+  static const Map<SorenessRegion, List<Muscle>> sorenessRegionGroups = {
+    SorenessRegion.chest: [Muscle.chest],
+    SorenessRegion.coreCenter: [Muscle.abs],
+    SorenessRegion.coreSides: [Muscle.obliques],
+    SorenessRegion.upperBack: [Muscle.upperBack, Muscle.trapezius],
+    SorenessRegion.lowerBack: [Muscle.lowerBack],
+    SorenessRegion.biceps: [Muscle.biceps],
+    SorenessRegion.triceps: [Muscle.triceps],
+    SorenessRegion.shoulders: [Muscle.deltoids],
+    SorenessRegion.forearms: [Muscle.forearm],
+    SorenessRegion.quads: [Muscle.quadriceps, Muscle.knees],
+    SorenessRegion.hamstrings: [Muscle.hamstring],
+    SorenessRegion.glutes: [Muscle.gluteal],
+    SorenessRegion.calves: [Muscle.calves, Muscle.tibialis, Muscle.ankles, Muscle.feet],
+    SorenessRegion.innerThigh: [Muscle.adductors],
+  };
+
+  static SorenessRegion? regionForMuscle(Muscle muscle) {
+    for (final entry in sorenessRegionGroups.entries) {
+      if (entry.value.contains(muscle)) return entry.key;
+    }
+    return null;
+  }
+
   /// Curated fine-grained muscle lists for the 5 seeded lifts, used for the
   /// static "muscles this hits" diagram on Lift detail. Keyed by exercise
   /// name rather than id, since these are hand-picked reference data, not
@@ -90,6 +124,8 @@ abstract class MuscleMap {
       Muscle.forearm,
     ],
     'Overhead Press': [Muscle.deltoids, Muscle.triceps, Muscle.trapezius],
+    'Pull Up': [Muscle.upperBack, Muscle.biceps, Muscle.forearm, Muscle.trapezius],
+    'Push Up': [Muscle.chest, Muscle.triceps, Muscle.deltoids, Muscle.abs],
   };
 
   /// Muscles to highlight for a given exercise: the curated list if one
@@ -136,6 +172,16 @@ abstract class MuscleMap {
       LiftCue(CueKind.setup, 'Bar at collarbone, brace core and glutes'),
       LiftCue(CueKind.motion, 'Press straight up, head moves back then through at lockout'),
       LiftCue(CueKind.safety, "Don't overarch your lower back — work on shoulder mobility instead"),
+    ],
+    'Pull Up': [
+      LiftCue(CueKind.setup, 'Dead hang, hands just outside shoulder-width'),
+      LiftCue(CueKind.motion, 'Pull until your chin clears the bar, control the way down'),
+      LiftCue(CueKind.safety, "Don't kip/swing to cheat reps — it stops being a controlled pull"),
+    ],
+    'Push Up': [
+      LiftCue(CueKind.setup, 'Hands under shoulders, body in a straight line'),
+      LiftCue(CueKind.motion, 'Chest to just above the floor, press back up without sagging hips'),
+      LiftCue(CueKind.safety, "Keep your core braced — don't let your lower back arch"),
     ],
   };
 }

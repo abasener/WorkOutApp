@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../data/profile_manager.dart';
 import '../../services/app_services.dart';
 import '../../services/backup_service.dart';
-import '../../services/test_data_service.dart';
 import '../../services/units.dart';
 import '../../services/user_profile.dart';
 import '../../theme/app_theme.dart';
@@ -72,12 +72,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return result ?? false;
   }
 
+  bool get _inDemoMode => AppServices.activeProfile.value == AppProfile.demo;
+
   Future<void> _wipeData() async {
     final confirmed = await _confirm(
       title: 'Wipe data?',
-      message: 'This permanently deletes every logged lift, bodyweight entry, '
-          'metric, and cycle entry. Your exercise list stays intact. This '
-          'cannot be undone.',
+      message: _inDemoMode
+          ? 'This permanently deletes every logged lift, bodyweight entry, '
+              'metric, and cycle entry from the demo data set. Your personal '
+              'data is untouched. This cannot be undone.'
+          : 'This permanently deletes every logged lift, bodyweight entry, '
+              'metric, and cycle entry. Your exercise list stays intact. This '
+              'cannot be undone.',
     );
     if (!confirmed) return;
     setState(() => _busy = true);
@@ -89,26 +95,51 @@ class _SettingsScreenState extends State<SettingsScreen> {
         .showSnackBar(const SnackBar(content: Text('All logged data wiped.')));
   }
 
-  Future<void> _loadTestData() async {
+  Future<void> _resetDemoData() async {
     final confirmed = await _confirm(
-      title: 'Load test data?',
-      message: 'This deletes ALL existing data (including your exercise list) '
-          'and replaces it with ~2 months of made-up but reasonable workout, '
-          'sleep, steps, soreness, bodyweight, and cycle history. This cannot '
+      title: 'Reset demo data?',
+      message: 'This replaces the current demo data set with a fresh ~2 '
+          'months of made-up workout, sleep, steps, soreness, bodyweight, '
+          'and cycle history. Your personal data is untouched. This cannot '
           'be undone.',
     );
     if (!confirmed) return;
     setState(() => _busy = true);
-    await TestDataService.load();
+    await AppServices.resetDemoData();
     setState(() => _busy = false);
     if (!mounted) return;
     ScaffoldMessenger.of(context)
-        .showSnackBar(const SnackBar(content: Text('Test data loaded.')));
+        .showSnackBar(const SnackBar(content: Text('Demo data reset.')));
+  }
+
+  Future<void> _setProfile(AppProfile profile) async {
+    if (AppServices.activeProfile.value == profile) return;
+    final switchingToDemo = profile == AppProfile.demo;
+    if (switchingToDemo) {
+      final confirmed = await _confirm(
+        title: 'Switch to demo data?',
+        message: 'Demo mode always starts from a fresh, made-up data set — '
+            'your personal data stays exactly as it is and isn\'t shown '
+            'while demo mode is on. Switch back to Personal any time to '
+            'return to it.',
+      );
+      if (!confirmed) return;
+    }
+    setState(() => _busy = true);
+    await AppServices.switchProfile(profile);
+    setState(() => _busy = false);
+    if (!mounted) return;
+    setState(() {});
   }
 
   Future<void> _setUnit(WeightUnit unit) async {
     if (Units.current == unit) return;
     await AppServices.setWeightUnit(unit);
+    setState(() {});
+  }
+
+  Future<void> _setHideWeight(bool hide) async {
+    await AppServices.setHideWeight(hide);
     setState(() {});
   }
 
@@ -138,6 +169,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(AppSpacing.edge),
         children: [
+          Text('Data set', style: AppText.subHeader),
+          const SizedBox(height: AppSpacing.standard),
+          AppCard(
+            backgroundColor: _inDemoMode ? AppColors.accentDim : null,
+            borderColor: _inDemoMode ? AppColors.accent : null,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(child: Text('Active data set', style: AppText.bodyText)),
+                    ValueListenableBuilder<AppProfile>(
+                      valueListenable: AppServices.activeProfile,
+                      builder: (context, profile, child) =>
+                          _ProfileToggle(selected: profile, onChanged: _busy ? (_) {} : _setProfile),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.small),
+                Text(
+                  _inDemoMode
+                      ? 'Demo mode is on — everything you see is made-up '
+                          'data. Your personal data is untouched and comes '
+                          'back exactly as it was when you switch back.'
+                      : 'Personal is your real logged history. Switch to '
+                          'Demo any time to try things out on a disposable, '
+                          'always-fresh made-up data set instead.',
+                  style: AppText.smallText,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: AppSpacing.large),
           Text('Profile', style: AppText.subHeader),
           const SizedBox(height: AppSpacing.standard),
           AppCard(
@@ -181,12 +245,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Text('Units', style: AppText.subHeader),
           const SizedBox(height: AppSpacing.standard),
           AppCard(
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(child: Text('Weight unit', style: AppText.bodyText)),
-                _UnitToggle(
-                  selected: Units.current,
-                  onChanged: _setUnit,
+                Row(
+                  children: [
+                    Expanded(child: Text('Weight unit', style: AppText.bodyText)),
+                    _UnitToggle(
+                      selected: Units.current,
+                      onChanged: _setUnit,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.standard),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Hide my weight', style: AppText.bodyText),
+                          const SizedBox(height: AppSpacing.micro),
+                          Text(
+                            'Masks your bodyweight as "---" everywhere it\'s '
+                            'displayed — trends and progress still show, just not '
+                            'the raw number. Lift weights (squat, bench, etc.) are '
+                            'never affected. Entry/edit screens are unaffected.',
+                            style: AppText.smallText,
+                          ),
+                        ],
+                      ),
+                    ),
+                    Switch(
+                      value: Units.hideWeight,
+                      activeThumbColor: AppColors.accent,
+                      onChanged: _setHideWeight,
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -281,12 +376,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Load test data', style: AppText.bodyText),
+                Text('Reset demo data', style: AppText.bodyText),
                 const SizedBox(height: AppSpacing.micro),
                 Text(
-                  'Wipes everything and fills in ~2 months of made-up lift, '
-                  'sleep, steps, soreness, bodyweight, and cycle history so '
-                  'trends/predictions can be reviewed with real-looking data.',
+                  _inDemoMode
+                      ? 'Replaces the current demo set with a fresh ~2 '
+                          'months of made-up lift, sleep, steps, soreness, '
+                          'bodyweight, and cycle history. Your personal data '
+                          'is a separate file and is never touched by this.'
+                      : 'Switch to Demo (above) to use this — it regenerates '
+                          'a fresh made-up data set, entirely separate from '
+                          'your personal data.',
                   style: AppText.smallText,
                 ),
                 const SizedBox(height: AppSpacing.standard),
@@ -297,8 +397,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       side: const BorderSide(color: AppColors.accent),
                       foregroundColor: AppColors.accent,
                     ),
-                    onPressed: _busy ? null : _loadTestData,
-                    child: const Text('Load Test Data'),
+                    onPressed: _busy || !_inDemoMode ? null : _resetDemoData,
+                    child: const Text('Reset Demo Data'),
                   ),
                 ),
               ],
@@ -317,6 +417,47 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: AppSpacing.xLarge),
         ],
+      ),
+    );
+  }
+}
+
+class _ProfileToggle extends StatelessWidget {
+  final AppProfile selected;
+  final ValueChanged<AppProfile> onChanged;
+  const _ProfileToggle({required this.selected, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surfaceRaised,
+        borderRadius: BorderRadius.circular(AppRadius.pill),
+        border: Border.all(color: AppColors.border),
+      ),
+      padding: const EdgeInsets.all(3),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: AppProfile.values.map((p) {
+          final isSelected = p == selected;
+          return GestureDetector(
+            onTap: () => onChanged(p),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              decoration: BoxDecoration(
+                color: isSelected ? AppColors.accent : Colors.transparent,
+                borderRadius: BorderRadius.circular(AppRadius.pill),
+              ),
+              child: Text(
+                p == AppProfile.personal ? 'Personal' : 'Demo',
+                style: AppText.smallText.copyWith(
+                  color: isSelected ? Colors.white : AppColors.textSecondary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          );
+        }).toList(),
       ),
     );
   }

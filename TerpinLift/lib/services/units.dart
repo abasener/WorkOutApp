@@ -11,6 +11,11 @@ extension WeightUnitKey on WeightUnit {
 abstract class Units {
   static WeightUnit current = WeightUnit.lb;
 
+  /// When on, read-only weight displays show "---lb" instead of the real
+  /// number (lift weights/e1RM/PRs and bodyweight alike) — entry/edit forms
+  /// are unaffected, since you need the real number to log or fix one.
+  static bool hideWeight = false;
+
   static double _lbToKg(double lb) => lb * 0.453592;
 
   static double displayValue(double lb) =>
@@ -24,4 +29,9 @@ abstract class Units {
   static String get suffix => current.key;
 
   static String format(double lb) => '${displayValue(lb).round()} $suffix';
+
+  /// Same as [format], but returns a masked "---lb" placeholder when
+  /// [hideWeight] is on — the single call site every weight display should
+  /// go through so the setting applies consistently everywhere.
+  static String formatMaskable(double lb) => hideWeight ? '--- $suffix' : format(lb);
 }
