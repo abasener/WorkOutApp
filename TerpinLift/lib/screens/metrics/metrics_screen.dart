@@ -5,6 +5,7 @@ import '../../data/models/bodyweight_entry.dart';
 import '../../data/models/metric_entry.dart';
 import '../../services/app_services.dart';
 import '../../services/muscle_map.dart';
+import '../../services/trend_engine.dart';
 import '../../services/units.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/app_card.dart';
@@ -36,6 +37,7 @@ class _MetricsScreenState extends State<MetricsScreen>
   List<BodyweightEntry> _bodyweight = [];
   int _cycleFlowDaysCount = 0;
   final Map<SorenessRegion, int> _latestSoreness = {};
+  Map<String, double> _workoutDurationByDate = {};
 
   @override
   void initState() {
@@ -59,6 +61,8 @@ class _MetricsScreenState extends State<MetricsScreen>
     final allMetrics = await AppServices.metrics.getAll();
     final bodyweight = await AppServices.bodyweight.getAll();
     final flowEntries = await AppServices.cycle.getFlowEntries();
+    final liftSessions = await AppServices.lifts.getAllSessions();
+    final workoutDurationByDate = TrendEngine.workoutDurationMinutesByDate(liftSessions);
 
     final soreness = <SorenessRegion, int>{};
     for (final region in MuscleMap.sorenessRegionGroups.keys) {
@@ -81,6 +85,7 @@ class _MetricsScreenState extends State<MetricsScreen>
       _latestSoreness
         ..clear()
         ..addAll(soreness);
+      _workoutDurationByDate = workoutDurationByDate;
       _loading = false;
     });
   }
@@ -144,6 +149,17 @@ class _MetricsScreenState extends State<MetricsScreen>
         .where((e) => DateTime.parse(e.date).isAfter(cutoff))
         .map((e) => ChartPoint(DateTime.parse(e.date), e.value))
         .toList();
+  }
+
+  /// One point per date with any timed lift session — derived from
+  /// `lift_sessions.started_at`/`completed_at`, not a manually-logged
+  /// metric, so it's not in `_entries` alongside steps/sleep.
+  List<ChartPoint> _workoutDurationPoints(DateTime cutoff) {
+    return _workoutDurationByDate.entries
+        .where((e) => DateTime.parse(e.key).isAfter(cutoff))
+        .map((e) => ChartPoint(DateTime.parse(e.key), e.value))
+        .toList()
+      ..sort((a, b) => a.date.compareTo(b.date));
   }
 
   /// One dot per week (average of that week's entries) so no single raw
@@ -218,6 +234,13 @@ class _MetricsScreenState extends State<MetricsScreen>
           'Sleep (hrs)',
           _points(MetricType.sleepHours, cutoff),
           trendWindowDays: 30,
+        ),
+        const SizedBox(height: AppSpacing.cardGap),
+        _metricCard(
+          'Workout Duration (min)',
+          _workoutDurationPoints(cutoff),
+          trendWindowDays: 30,
+          yFormatter: (v) => '${v.round()}m',
         ),
         const SizedBox(height: AppSpacing.cardGap),
         AppCard(

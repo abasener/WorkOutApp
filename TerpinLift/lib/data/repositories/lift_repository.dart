@@ -33,9 +33,18 @@ class SessionWithSets {
         .reduce((a, b) => a > b ? a : b);
   }
 
-  /// Sum of RPE across this session's sets (missing RPE counts as 0) — used
-  /// for the Workouts tab's relative-intensity bar.
-  double get rpeSum => sets.fold<double>(0, (sum, s) => sum + (s.rpe ?? 0));
+  /// Average RPE across this session's sets that actually logged one (sets
+  /// without an RPE are excluded rather than counted as 0 — a session with
+  /// unrated sets shouldn't read as "easy"); `null` if none did. Used for
+  /// the Workouts tab's intensity bar. Deliberately an average, not a sum —
+  /// summing meant a session with more sets always outscored one with fewer
+  /// harder sets regardless of actual effort, which is what made the color
+  /// feel arbitrary (designFiles/03_SCREEN_lifts.md).
+  double? get avgRpe {
+    final rated = sets.where((s) => s.rpe != null).toList();
+    if (rated.isEmpty) return null;
+    return rated.fold<double>(0, (sum, s) => sum + s.rpe!) / rated.length;
+  }
 }
 
 class LiftRepository {

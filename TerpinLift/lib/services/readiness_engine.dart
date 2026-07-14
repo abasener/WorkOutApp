@@ -7,6 +7,7 @@ import '../data/repositories/lift_repository.dart';
 import 'app_services.dart';
 import 'muscle_map.dart';
 import 'training_composition_service.dart';
+import 'user_profile.dart';
 
 /// One broad muscle group's actionable status — the icon-row on Home. Three
 /// states, deliberately coarser than the fine-grained readiness map: this is
@@ -52,8 +53,22 @@ class CategoryStatus {
 ///   trending down against its own recent average (an emerging slump/
 ///   overreach), readiness is pulled down rather than just reflecting time
 ///   elapsed.
+/// - **Session volume** — if the most recent session's tonnage (reps ×
+///   weight, same exercise only — see `_volumeSpikeDetected`) came in well
+///   above that exercise's own recent average, that session earns a bit
+///   more recovery credit than pure recency alone would give it.
+/// - **Age** — `UserProfile.ageBucket.recoveryWindowMultiplier` scales every
+///   muscle's recovery window (older brackets get longer windows — the
+///   opposite direction from the strength-standard age adjustment, since
+///   recovery from muscle damage slows with age while expected max strength
+///   also declines; two different curves, not one).
+/// - **Extra lower-body load from steps** (legs/hips muscles only) — if
+///   today's step count is well above your own recent daily average, that
+///   reads as extra endurance-style load concentrated in the muscles
+///   walking/running actually taxes, per the well-documented interference
+///   effect between endurance activity and strength recovery.
 ///
-/// All five combine multiplicatively into a single 0-1 score per muscle.
+/// All factors combine multiplicatively into a single 0-1 score per muscle.
 class ReadinessEngine {
   /// Hours before a muscle is considered fully recovered from the last time
   /// it was trained. Bigger/multi-joint muscle groups (quads, hamstrings,
@@ -91,6 +106,108 @@ class ReadinessEngine {
     final nonNull = values.whereType<double>().toList();
     if (nonNull.isEmpty) return null;
     return nonNull.reduce((a, b) => a + b) / nonNull.length;
+  }
+
+  /// Minimum sessions logged for a muscle/category before RPE/e1RM trend
+  /// signals are trusted as fatigue rather than noise. A brand-new lifter's
+  /// (or a lift's) first few sessions are dominated by rapid neural/
+  /// technique-learning adaptation, not accumulating fatigue — trainees
+  /// commonly see large session-to-session swings in this early phase that
+  /// have nothing to do with overreaching (the well-documented "newbie
+  /// gains" window in strength-training literature). Treating a 2-session
+  /// swing as a trend also meant the "prior" baseline being compared
+  /// against was sometimes a single noisy session rather than an average of
+  /// several — 4 sessions guarantees at least 3 priors to average
+  /// (`priorWindow` below), a much steadier baseline either way. This is
+  /// also genuinely distinct from `StrengthStandards`' clinical-sounding
+  /// "overtraining" framing: what this flags is *functional overreaching*
+  /// (short-term RPE/performance dip, expected to resolve in days-to-weeks
+  /// with a bit of easing off) — true Overtraining Syndrome is a much
+  /// rarer, more severe condition (months of hormonal/immune disruption)
+  /// this app makes no attempt to detect, and the UI copy (`MuscleStatusRow`
+  /// ) is deliberately worded to match — "ease up on this group," not
+  /// "you're overtrained."
+  static const minSessionsForTrendSignal = 4;
+
+  /// True if the most recent session shows meaningfully more fatigue than
+  /// the established baseline (up to the last 3 prior sessions) — either a
+  /// notably higher average RPE, or an e1RM dip against that recent
+  /// average. Always false below [minSessionsForTrendSignal] total
+  /// sessions — see its doc comment for why.
+  static bool trendFatigueDetected(List<SessionWithSets> sessions) {
+    if (sessions.length < minSessionsForTrendSignal) return false;
+    final recent = sessions.first;
+    final priorWindow = sessions.skip(1).take(3).toList();
+
+    final recentAvgRpe = _avgRpe(recent.sets);
+    final priorAvgRpe = _avgOf(priorWindow.map((s) => _avgRpe(s.sets)));
+    if (recentAvgRpe != null && priorAvgRpe != null && recentAvgRpe - priorAvgRpe > 1.5) {
+      return true;
+    }
+    if (priorWindow.isNotEmpty) {
+      final priorAvgE1rm =
+          priorWindow.map((s) => s.bestE1rm).reduce((a, b) => a + b) / priorWindow.length;
+      if (priorAvgE1rm > 0 && recent.bestE1rm < priorAvgE1rm * 0.95) return true;
+    }
+    return false;
+  }
+
+  static double _volume(List<LiftSet> sets) =>
+      sets.fold<double>(0, (sum, s) => sum + s.reps * s.weight);
+
+  /// True if the most recent session hitting [muscle] moved notably more
+  /// total weight (reps × weight) than that **same exercise's** own recent
+  /// average — a session doing meaningfully more work needs a bit more
+  /// recovery credit than pure recency alone accounts for. Deliberately
+  /// scoped to the same exercise, not every exercise sharing this muscle
+  /// tag — comparing tonnage across genuinely different lifts (e.g. a heavy
+  /// Squat session against a Hip Adduction Machine session) is comparing
+  /// incommensurable numbers, the same pitfall `trendFatigueDetected` has
+  /// (see `07_SMART_TRENDS.md` "known bug, found but not yet fixed" — that
+  /// one's still open; this new factor was written to avoid the same
+  /// mistake from the start rather than repeat it). Gated behind
+  /// [minSessionsForTrendSignal] sessions of history for the same reason as
+  /// the other trend signals — not enough same-exercise history yet to
+  /// call anything a spike.
+  static bool volumeSpikeDetected(List<SessionWithSets> sessionsForMuscle) {
+    if (sessionsForMuscle.length < minSessionsForTrendSignal) return false;
+    final recent = sessionsForMuscle.first;
+    final sameExercisePrior = sessionsForMuscle
+        .skip(1)
+        .where((s) => s.session.exerciseId == recent.session.exerciseId)
+        .take(3)
+        .toList();
+    if (sameExercisePrior.isEmpty) return false;
+
+    final recentVolume = _volume(recent.sets);
+    final priorAvgVolume =
+        sameExercisePrior.map((s) => _volume(s.sets)).reduce((a, b) => a + b) /
+            sameExercisePrior.length;
+    return priorAvgVolume > 0 && recentVolume > priorAvgVolume * 1.3;
+  }
+
+  /// Extra fatigue factor for leg/hip muscles only, from unusually high
+  /// step counts — a big walking/running day taxes the same muscles
+  /// endurance work actually uses, on top of whatever lifting already
+  /// happened (the well-documented interference effect between endurance
+  /// activity and strength recovery). Compared against the user's own
+  /// recent daily average (same self-relative pattern as every other trend
+  /// factor here), not a fixed step target — a 15k-step day means something
+  /// different for someone who averages 3k versus someone who averages 12k.
+  ///
+  /// **Placeholder for future recovery signals**: once Google Health
+  /// Connect integration exists, HRV and resting heart rate would be much
+  /// more direct systemic-fatigue measures than steps — they'd slot in here
+  /// the same way this does (an extra multiplicative factor computed from a
+  /// self-relative baseline). Steps is the only proxy available today.
+  static Future<double> _legLoadFactor() async {
+    final recentSteps = await AppServices.metrics.getByType(MetricType.steps, limit: 15);
+    if (recentSteps.length < 2) return 1.0;
+    final today = recentSteps.first.value;
+    final baseline = recentSteps.skip(1).map((e) => e.value).toList();
+    final avg = baseline.reduce((a, b) => a + b) / baseline.length;
+    if (avg <= 0 || today <= avg * 1.5) return 1.0;
+    return 0.85; // notably more walking/running than usual
   }
 
   static Future<Map<Muscle, double>> computeMuscleReadiness() async {
@@ -131,10 +248,14 @@ class ReadinessEngine {
       }
     }
 
+    final ageMultiplier = UserProfile.ageBucket.recoveryWindowMultiplier;
+    final legLoadFactor = await _legLoadFactor();
+    final legMuscles = MuscleMap.broadGroups[ExerciseCategory.legs] ?? const <Muscle>[];
+
     final result = <Muscle, double>{};
     for (final entry in _recoveryHours.entries) {
       final muscle = entry.key;
-      final recoveryWindowHours = entry.value;
+      final recoveryWindowHours = entry.value * ageMultiplier;
       final sessions = sessionsByMuscle[muscle] ?? const <SessionWithSets>[];
 
       final recoveryFraction = sessions.isEmpty
@@ -149,7 +270,7 @@ class ReadinessEngine {
 
       var rpeTrendFactor = 1.0;
       var overloadTrendFactor = 1.0;
-      if (sessions.length >= 2) {
+      if (sessions.length >= minSessionsForTrendSignal) {
         final recent = sessions.first;
         final priorWindow = sessions.skip(1).take(3).toList();
 
@@ -170,7 +291,11 @@ class ReadinessEngine {
         }
       }
 
+      final volumeFactor = volumeSpikeDetected(sessions) ? 0.9 : 1.0;
+
       result[muscle] = (recoveryFraction *
+              volumeFactor *
+              (legMuscles.contains(muscle) ? legLoadFactor : 1.0) *
               sorenessFactor *
               sleepFactor *
               rpeTrendFactor *
@@ -247,26 +372,7 @@ class ReadinessEngine {
         continue;
       }
 
-      var overreaching = false;
-      if (sessions.length >= 2) {
-        final recent = sessions.first;
-        final priorWindow = sessions.skip(1).take(3).toList();
-
-        final recentAvgRpe = _avgRpe(recent.sets);
-        final priorAvgRpe = _avgOf(priorWindow.map((s) => _avgRpe(s.sets)));
-        if (recentAvgRpe != null && priorAvgRpe != null && recentAvgRpe - priorAvgRpe > 1.5) {
-          overreaching = true;
-        }
-        if (!overreaching && priorWindow.isNotEmpty) {
-          final priorAvgE1rm =
-              priorWindow.map((s) => s.bestE1rm).reduce((a, b) => a + b) / priorWindow.length;
-          if (priorAvgE1rm > 0 && recent.bestE1rm < priorAvgE1rm * 0.95) {
-            overreaching = true;
-          }
-        }
-      }
-
-      if (overreaching) {
+      if (trendFatigueDetected(sessions)) {
         results.add(CategoryStatus(category, MuscleGroupStatus.overreaching));
         continue;
       }

@@ -8,6 +8,7 @@ import '../../services/units.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/date_picker_field.dart';
 import '../../widgets/info_tooltip.dart';
+import '../../widgets/plate_calculator_sheet.dart';
 
 class _PendingSet {
   int reps;
@@ -143,9 +144,29 @@ class _LogLiftFormState extends State<LogLiftForm> {
                       ],
                     ),
                     const SizedBox(height: AppSpacing.standard),
-                    DatePickerField(
-                      date: _date,
-                      onChanged: (d) => setState(() => _date = d),
+                    Row(
+                      children: [
+                        DatePickerField(
+                          date: _date,
+                          onChanged: (d) => setState(() => _date = d),
+                        ),
+                        const SizedBox(width: AppSpacing.small),
+                        OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(color: AppColors.border),
+                            foregroundColor: AppColors.textPrimary,
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          ),
+                          onPressed: () => showModalBottomSheet(
+                            context: context,
+                            isScrollControlled: true,
+                            backgroundColor: Colors.transparent,
+                            builder: (_) => const PlateCalculatorSheet(),
+                          ),
+                          icon: const Icon(Icons.calculate_outlined, size: 16),
+                          label: const Text('Calc'),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: AppSpacing.standard),
                     if (_exercises.isEmpty)
@@ -225,7 +246,17 @@ class _LogLiftFormState extends State<LogLiftForm> {
       child: Row(
         children: [
           Text('Set ${i + 1}', style: AppText.smallText),
-          const SizedBox(width: AppSpacing.standard),
+          const SizedBox(width: AppSpacing.small),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+            onPressed: _sets.length <= 1 ? null : () => setState(() => _sets.removeAt(i)),
+            icon: const Icon(Icons.remove_circle_outline, size: 18),
+            color: AppColors.textSecondary,
+            disabledColor: AppColors.border,
+          ),
+          const SizedBox(width: AppSpacing.small),
           Expanded(
             child: TextFormField(
               key: ValueKey('reps_$i'),

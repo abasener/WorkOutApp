@@ -3,7 +3,7 @@ import 'package:sqflite/sqflite.dart';
 import 'profile_manager.dart';
 
 class DatabaseHelper {
-  static const _kDbVersion = 9;
+  static const _kDbVersion = 11;
 
   /// Which data set this instance reads/writes — see `ProfileManager`.
   /// `AppServices.switchProfile` swaps in a new `DatabaseHelper` rather than
@@ -19,14 +19,14 @@ class DatabaseHelper {
   /// says "whichever undertrained" — both slots show, filling either (or
   /// neither) is fine, matching "no slot is required."
   static const _defaultTemplateDays = [
-    {'label': 'Day 1', 'patterns': 'squat,adductorAbductor'},
-    {'label': 'Day 2', 'patterns': 'horizontalPush,verticalPull,core'},
-    {'label': 'Day 3', 'patterns': 'hinge,hamstringGlute'},
+    {'label': 'Squat Focus', 'patterns': 'squat,adductorAbductor'},
+    {'label': 'Push & Pull', 'patterns': 'horizontalPush,verticalPull,core'},
+    {'label': 'Hinge Focus', 'patterns': 'hinge,hamstringGlute'},
     {
-      'label': 'Day 4',
+      'label': 'Overhead & Rows',
       'patterns': 'verticalPush,horizontalPull,shoulderPrehab,armsAesthetic',
     },
-    {'label': 'Day 5', 'patterns': 'squat,hinge,quadGlute'},
+    {'label': 'Legs & Hips', 'patterns': 'squat,hinge,quadGlute'},
   ];
 
   /// The full seeded exercise list — the 7 original launch lifts plus a
@@ -456,6 +456,84 @@ class DatabaseHelper {
       'categories': 'back,legs,core,pull',
       'equipment': 'cardio',
     },
+
+    // --- Core, bodyweight (dynamic reps — isometric holds like planks are
+    // deliberately excluded, see the v11 migration comment for why) ---
+    {'name': 'Russian Twist', 'categories': 'core', 'equipment': 'bodyweight', 'patterns': 'core'},
+    {'name': 'Dead Bug', 'categories': 'core', 'equipment': 'bodyweight', 'patterns': 'core'},
+    {
+      'name': 'Bicycle Crunch',
+      'categories': 'core',
+      'equipment': 'bodyweight',
+      'patterns': 'core',
+    },
+    {
+      'name': 'Flutter Kicks',
+      'categories': 'core',
+      'equipment': 'bodyweight',
+      'patterns': 'core',
+    },
+    {'name': 'V-Up', 'categories': 'core', 'equipment': 'bodyweight', 'patterns': 'core'},
+    {'name': 'Leg Raise', 'categories': 'core', 'equipment': 'bodyweight', 'patterns': 'core'},
+    {'name': 'Bird Dog', 'categories': 'core,back', 'equipment': 'bodyweight', 'patterns': 'core'},
+    {
+      'name': 'Superman',
+      'categories': 'back,core',
+      'equipment': 'bodyweight',
+      'patterns': 'hamstringGlute',
+    },
+
+    // --- Machines added v11, cross-checked against the Precor Resolute/
+    // Discovery selectorized+plate-loaded lineups (the user's gym equipment)
+    // for coverage gaps ---
+    {
+      'name': 'Ab Crunch Machine',
+      'categories': 'core',
+      'equipment': 'machine',
+      'patterns': 'core',
+    },
+    {
+      'name': 'Back Extension Machine',
+      'categories': 'back,legs',
+      'equipment': 'machine',
+      'patterns': 'hamstringGlute',
+    },
+    {
+      'name': 'Rotary Torso Machine',
+      'categories': 'core',
+      'equipment': 'machine',
+      'patterns': 'core',
+    },
+    {
+      'name': 'Glute Extension Machine',
+      'categories': 'legs',
+      'equipment': 'machine',
+      'patterns': 'hamstringGlute',
+    },
+    {
+      'name': 'Bicep Curl Machine',
+      'categories': 'arms,pull',
+      'equipment': 'machine',
+      'patterns': 'armsAesthetic',
+    },
+    {
+      'name': 'Triceps Extension Machine',
+      'categories': 'arms,push',
+      'equipment': 'machine',
+      'patterns': 'armsAesthetic',
+    },
+    {
+      'name': 'Seated Dip Machine',
+      'categories': 'chest,push,arms',
+      'equipment': 'machine',
+      'patterns': 'horizontalPush',
+    },
+    {
+      'name': 'Low Row Machine',
+      'categories': 'back,pull,arms',
+      'equipment': 'machine',
+      'patterns': 'horizontalPull',
+    },
   ];
 
   Database? _db;
@@ -755,6 +833,79 @@ class DatabaseHelper {
           )
         ''');
         await _seedDefaultWorkoutTemplate(db);
+      case 10:
+        // Renames the seeded default template's "Day 1".."Day 5" labels to
+        // pattern-descriptive names (designFiles/10_WORKOUT_PLANNER.md) —
+        // "Day 3" reads as ambiguous once there's more than one day list on
+        // screen, per on-device feedback. Only touches the one seeded
+        // default template's days, matched by day_order, since the
+        // template-builder UI (phase 3) that would let a user create their
+        // own doesn't exist yet — nothing else to accidentally rename.
+        final defaultTemplate = await db.query(
+          'workout_templates',
+          where: 'is_default = 1',
+          limit: 1,
+        );
+        if (defaultTemplate.isNotEmpty) {
+          final templateId = defaultTemplate.first['id'] as int;
+          for (var i = 0; i < _defaultTemplateDays.length; i++) {
+            await db.update(
+              'workout_template_days',
+              {'day_label': _defaultTemplateDays[i]['label']},
+              where: 'template_id = ? AND day_order = ?',
+              whereArgs: [templateId, i],
+            );
+          }
+        }
+      case 11:
+        // Adds 8 more bodyweight core exercises (Russian Twist, Dead Bug,
+        // Bicycle Crunch, Flutter Kicks, V-Up, Leg Raise, Bird Dog,
+        // Superman — all dynamic-rep movements; isometric holds like planks
+        // are deliberately excluded, since this app's data model is
+        // reps/weight/RPE-shaped and doesn't have a good way to track a
+        // held position yet) plus 8 machines cross-checked against the
+        // user's actual gym equipment (Precor's Resolute/Discovery
+        // selectorized+plate-loaded lineups): Ab Crunch Machine, Back
+        // Extension Machine, Rotary Torso Machine, Glute Extension Machine,
+        // Bicep Curl Machine, Triceps Extension Machine, Seated Dip
+        // Machine, Low Row Machine. Insert-only-if-missing, same pattern as
+        // the v5/v8 backfills — anyone already on this exercise list from a
+        // fresh v11+ install isn't touched.
+        final existingNamesV11 = (await db.query('exercises', columns: ['name']))
+            .map((r) => r['name'] as String)
+            .toSet();
+        final todayV11 = DateTime.now().toIso8601String().substring(0, 10);
+        const newInV11 = {
+          'Russian Twist',
+          'Dead Bug',
+          'Bicycle Crunch',
+          'Flutter Kicks',
+          'V-Up',
+          'Leg Raise',
+          'Bird Dog',
+          'Superman',
+          'Ab Crunch Machine',
+          'Back Extension Machine',
+          'Rotary Torso Machine',
+          'Glute Extension Machine',
+          'Bicep Curl Machine',
+          'Triceps Extension Machine',
+          'Seated Dip Machine',
+          'Low Row Machine',
+        };
+        for (final e in _seedExercises) {
+          if (!newInV11.contains(e['name']) || existingNamesV11.contains(e['name'])) continue;
+          await db.insert('exercises', {
+            'name': e['name'],
+            'category': e['categories'],
+            'equipment_tags': e['equipment'],
+            'movement_patterns': e['patterns'],
+            'is_seeded': 1,
+            'youtube_url': null,
+            'created': todayV11,
+            'pinned': 0,
+          });
+        }
     }
   }
 

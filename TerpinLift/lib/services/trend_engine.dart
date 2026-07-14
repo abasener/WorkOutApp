@@ -38,6 +38,27 @@ class TrendEngine {
     return days.clamp(0, 5);
   }
 
+  /// Total logged lift time per date, in minutes — the Metrics "Workout
+  /// Duration" trend chart. Only counts sessions with both `started_at` and
+  /// `completed_at` set (i.e. "Track time" was on when logging, `04_SCREEN_
+  /// quick_log.md`); sessions without a timer just don't contribute, they're
+  /// not treated as 0 minutes. Sums every session on a date rather than
+  /// taking one, since a single day can have more than one logged session
+  /// (multiple exercises, or more than one workout).
+  static Map<String, double> workoutDurationMinutesByDate(List<SessionWithSets> sessions) {
+    final result = <String, double>{};
+    for (final s in sessions) {
+      final startedAt = s.session.startedAt;
+      final completedAt = s.session.completedAt;
+      if (startedAt == null || completedAt == null) continue;
+      final minutes =
+          DateTime.parse(completedAt).difference(DateTime.parse(startedAt)).inSeconds / 60;
+      if (minutes <= 0) continue; // clock skew/bad data guard, not a real duration
+      result[s.session.date] = (result[s.session.date] ?? 0) + minutes;
+    }
+    return result;
+  }
+
   /// How hard the most recent session was, based on its average RPE.
   static LiftIntensity? lastIntensity(List<SessionWithSets> sessions) {
     if (sessions.isEmpty) return null;

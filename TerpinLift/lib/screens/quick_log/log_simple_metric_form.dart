@@ -39,10 +39,23 @@ class _LogSimpleMetricFormState extends State<LogSimpleMetricForm> {
     text: widget.initialValue == null
         ? ''
         : (widget.kind == SimpleMetricKind.bodyweight
-            ? Units.displayValue(widget.initialValue!)
-            : widget.initialValue!)
-            .toStringAsFixed(widget.kind == SimpleMetricKind.sleep ? 1 : 0),
+                ? Units.displayValue(widget.initialValue!)
+                : widget.initialValue!)
+            .toStringAsFixed(0),
   );
+
+  // Sleep is entered as hours + minutes (more natural than typing "7.5")
+  // but still stored as decimal hours — `MetricType.sleepHours` and every
+  // downstream trend calculation are unchanged, this only touches entry.
+  late final _hoursController = TextEditingController(
+    text: widget.initialValue == null ? '' : widget.initialValue!.floor().toString(),
+  );
+  late final _minutesController = TextEditingController(
+    text: widget.initialValue == null
+        ? ''
+        : ((widget.initialValue! - widget.initialValue!.floor()) * 60).round().toString(),
+  );
+
   bool _saving = false;
   late DateTime _date = widget.initialDate ?? DateTime.now();
 
@@ -74,11 +87,22 @@ class _LogSimpleMetricFormState extends State<LogSimpleMetricForm> {
   @override
   void dispose() {
     _controller.dispose();
+    _hoursController.dispose();
+    _minutesController.dispose();
     super.dispose();
   }
 
+  double? get _enteredSleepHours {
+    final hours = int.tryParse(_hoursController.text) ?? 0;
+    final minutes = int.tryParse(_minutesController.text) ?? 0;
+    if (_hoursController.text.isEmpty && _minutesController.text.isEmpty) return null;
+    return hours + minutes / 60;
+  }
+
   Future<void> _submit() async {
-    final entered = double.tryParse(_controller.text);
+    final entered = widget.kind == SimpleMetricKind.sleep
+        ? _enteredSleepHours
+        : double.tryParse(_controller.text);
     if (entered == null) return;
     setState(() => _saving = true);
     final dateStr = _date.toIso8601String().substring(0, 10);
@@ -142,13 +166,37 @@ class _LogSimpleMetricFormState extends State<LogSimpleMetricForm> {
               onChanged: (d) => setState(() => _date = d),
             ),
             const SizedBox(height: AppSpacing.standard),
-            TextField(
-              controller: _controller,
-              autofocus: true,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              style: AppText.bodyText,
-              decoration: InputDecoration(labelText: _label),
-            ),
+            if (widget.kind == SimpleMetricKind.sleep)
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _hoursController,
+                      autofocus: true,
+                      keyboardType: TextInputType.number,
+                      style: AppText.bodyText,
+                      decoration: const InputDecoration(labelText: 'Hours'),
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.standard),
+                  Expanded(
+                    child: TextField(
+                      controller: _minutesController,
+                      keyboardType: TextInputType.number,
+                      style: AppText.bodyText,
+                      decoration: const InputDecoration(labelText: 'Minutes'),
+                    ),
+                  ),
+                ],
+              )
+            else
+              TextField(
+                controller: _controller,
+                autofocus: true,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                style: AppText.bodyText,
+                decoration: InputDecoration(labelText: _label),
+              ),
             const SizedBox(height: AppSpacing.large),
             SizedBox(
               width: double.infinity,

@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_body_heatmap/flutter_body_heatmap.dart' show Muscle;
 
 import '../../data/models/exercise.dart';
 import '../../data/models/workout_plan.dart';
 import '../../services/app_services.dart';
+import '../../services/readiness_engine.dart';
+import '../../services/workout_plan_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/app_card.dart';
+import '../../widgets/readiness_bars.dart';
 import 'active_day_screen.dart';
 
 /// Day-first entry point for the Workout Planner (designFiles/
@@ -23,6 +27,8 @@ class _DaySelectScreenState extends State<DaySelectScreen> {
   bool _loading = true;
   List<WorkoutTemplateDay> _days = [];
   Map<int, PlannedSession> _latestByDay = {};
+  List<Exercise> _exercises = [];
+  Map<Muscle, double> _muscleReadiness = {};
 
   @override
   void initState() {
@@ -39,6 +45,8 @@ class _DaySelectScreenState extends State<DaySelectScreen> {
     }
     final days = await AppServices.workoutPlans.getDaysForTemplate(template!.id!);
     final latest = await AppServices.workoutPlans.latestSessionPerDay();
+    final exercises = await AppServices.exercises.getAll();
+    final muscleReadiness = await ReadinessEngine.computeMuscleReadiness();
     days.sort((a, b) {
       final da = latest[a.id]?.date;
       final db = latest[b.id]?.date;
@@ -51,6 +59,8 @@ class _DaySelectScreenState extends State<DaySelectScreen> {
     setState(() {
       _days = days;
       _latestByDay = latest;
+      _exercises = exercises;
+      _muscleReadiness = muscleReadiness;
       _loading = false;
     });
   }
@@ -111,7 +121,16 @@ class _DaySelectScreenState extends State<DaySelectScreen> {
                                 ],
                               ),
                             ),
-                            const Icon(Icons.chevron_right, color: AppColors.textSecondary),
+                            Column(
+                              children: [
+                                ReadinessBars(
+                                  readiness: WorkoutPlanService.dayReadinessBars(
+                                      day.patterns, _exercises, _muscleReadiness),
+                                ),
+                                const SizedBox(height: AppSpacing.micro),
+                                const Icon(Icons.chevron_right, color: AppColors.textSecondary),
+                              ],
+                            ),
                           ],
                         ),
                       ),

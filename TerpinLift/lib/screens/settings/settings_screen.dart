@@ -19,10 +19,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _busy = false;
   late final _birthYearController =
       TextEditingController(text: UserProfile.birthYear?.toString() ?? '');
+  late final _stepsGoalController =
+      TextEditingController(text: UserProfile.stepsGoal.toString());
 
   @override
   void dispose() {
     _birthYearController.dispose();
+    _stepsGoalController.dispose();
     super.dispose();
   }
 
@@ -161,6 +164,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() {});
   }
 
+  Future<void> _saveStepsGoal(String text) async {
+    final goal = int.tryParse(text.trim());
+    if (goal == null || goal <= 0) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Enter a valid steps goal.')));
+      return;
+    }
+    await AppServices.setStepsGoal(goal);
+    setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -282,6 +296,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       onChanged: _setHideWeight,
                     ),
                   ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: AppSpacing.large),
+          Text('Goals', style: AppText.subHeader),
+          const SizedBox(height: AppSpacing.standard),
+          AppCard(
+            child: Row(
+              children: [
+                Expanded(child: Text('Steps goal', style: AppText.bodyText)),
+                SizedBox(
+                  width: 90,
+                  child: TextField(
+                    controller: _stepsGoalController,
+                    keyboardType: TextInputType.number,
+                    textAlign: TextAlign.center,
+                    style: AppText.bodyText,
+                    decoration: const InputDecoration(hintText: 'e.g. 10000'),
+                    onSubmitted: _saveStepsGoal,
+                    onTapOutside: (_) => _saveStepsGoal(_stepsGoalController.text),
+                  ),
                 ),
               ],
             ),

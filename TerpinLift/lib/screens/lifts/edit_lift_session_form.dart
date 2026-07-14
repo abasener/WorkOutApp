@@ -197,7 +197,17 @@ class _EditLiftSessionFormState extends State<EditLiftSessionForm> {
       child: Row(
         children: [
           Text('Set ${i + 1}', style: AppText.smallText),
-          const SizedBox(width: AppSpacing.standard),
+          const SizedBox(width: AppSpacing.small),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+            onPressed: _sets.length <= 1 ? null : () => setState(() => _sets.removeAt(i)),
+            icon: const Icon(Icons.remove_circle_outline, size: 18),
+            color: AppColors.textSecondary,
+            disabledColor: AppColors.border,
+          ),
+          const SizedBox(width: AppSpacing.small),
           Expanded(
             child: TextFormField(
               key: ValueKey('reps_$i'),

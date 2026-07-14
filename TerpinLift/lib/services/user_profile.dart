@@ -53,6 +53,30 @@ extension AgeBucketInfo on AgeBucket {
     }
   }
 
+  /// Multiplier applied to `ReadinessEngine`'s per-muscle recovery windows —
+  /// the opposite direction from [standardMultiplier]: recovery from muscle
+  /// damage genuinely slows with age (older lifters see prolonged soreness
+  /// and a slower return of force-generating capacity per general
+  /// exercise-recovery literature), so older brackets get *longer* windows,
+  /// not smaller expected numbers. Same directional-generalization caveat
+  /// as everywhere else in this app — not individually measured.
+  double get recoveryWindowMultiplier {
+    switch (this) {
+      case AgeBucket.under20:
+        return 0.9; // recovers a bit faster than the reference bracket
+      case AgeBucket.twenties:
+        return 1.0; // reference bracket
+      case AgeBucket.thirties:
+        return 1.05;
+      case AgeBucket.forties:
+        return 1.15;
+      case AgeBucket.fifties:
+        return 1.3;
+      case AgeBucket.sixtyPlus:
+        return 1.5;
+    }
+  }
+
   static AgeBucket fromAge(int age) {
     if (age < 20) return AgeBucket.under20;
     if (age < 30) return AgeBucket.twenties;
@@ -72,6 +96,10 @@ extension AgeBucketInfo on AgeBucket {
 abstract class UserProfile {
   static Gender gender = Gender.female;
   static int? birthYear;
+
+  /// Daily step target for the Home week-rings widget. Was hardcoded at
+  /// 10,000 (the generic default); now user-adjustable in Settings.
+  static int stepsGoal = 10000;
 
   static AgeBucket get ageBucket {
     if (birthYear == null) return AgeBucket.twenties;

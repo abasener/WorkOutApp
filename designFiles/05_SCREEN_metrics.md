@@ -11,6 +11,7 @@ Added after real use surfaced a real gap: a mistyped bodyweight (or steps/sleep/
 ## Overview tab — implemented (cards)
 - **Steps** — `LabeledTrendChart`, 6-month cap, prediction extension on.
 - **Sleep (hrs)** — `LabeledTrendChart`, 6-month cap, no prediction extension (not one of the "things with predictions" yet).
+- **Workout Duration (min)** — `LabeledTrendChart`, one point per date, no prediction extension. **Derived, not manually logged** — unlike steps/sleep/weight there's no entry form for this; `TrendEngine.workoutDurationMinutesByDate` sums `lift_sessions.completed_at − started_at` per date across every logged session that day. Only counts sessions where both timestamps are set (i.e. "Track time" was on when logging, `04_SCREEN_quick_log.md`) — a session logged with tracking off just doesn't contribute a data point that day, it isn't treated as 0 minutes. A non-positive duration (clock skew/bad data) is dropped the same way. Covered by `trend_engine_test.dart`.
 - **Soreness** — replaced the trend chart with a small non-interactive body-heatmap preview (front + back side by side) showing each region's most recent 0-5 level; tapping the card opens the same body-map logging sheet used from the FAB. See `00_UX_DESIGN.md` "Soreness body map."
 
 ### Resolved — Metrics soreness preview refresh bug

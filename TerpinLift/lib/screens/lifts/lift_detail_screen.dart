@@ -168,13 +168,26 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
     for (final s in sessionsWithE1rm) {
       if (bestSession == null || e1rmValueOf(s) > e1rmValueOf(bestSession)) bestSession = s;
     }
-    final prBestE1rm = bestSession == null
+    // The Epley-projected, decayed estimate — kept as a clearly-separate
+    // "Predicted 1RM" number (below), never the gauge's fill/tier position.
+    // That used to be the same number, which read as "the app claims I
+    // lifted 115 when I only ever did 100x4" — an accidental inflation, not
+    // a lie, but confusing without the projection being labeled as such.
+    final predicted1Rm = bestSession == null
         ? null
         : StrengthStandards.effectiveBestE1rm(
             e1rmValueOf(bestSession),
             DateTime.parse(bestSession.session.date),
             DateTime.now(),
           );
+    // The gauge's actual fill/tier position: the heaviest weight literally
+    // logged on any set, ever — never Epley-projected, never decayed (a PR
+    // is a historical fact, it doesn't un-happen if you take time off).
+    // `null` (not 0) when nothing's logged yet, matching `predicted1Rm`'s
+    // null-when-empty so the Goal section's existing gating still applies.
+    final allWeights = _sessions.expand((s) => s.sets).map((set) => set.weight).toList();
+    final trueMaxWeight =
+        allWeights.isEmpty ? null : allWeights.reduce((a, b) => a > b ? a : b);
     final tierTargets = (_bodyweightLb != null && StrengthStandards.hasStandard(_exercise.name))
         ? StrengthStandards.allTargets(
             exerciseName: _exercise.name,
@@ -214,7 +227,8 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
           );
 
     final goalTierTargets = isBodyweightLift ? repStandardTargets : tierTargets;
-    final goalCurrentValue = isBodyweightLift ? prBestReps : prBestE1rm;
+    final goalCurrentValue = isBodyweightLift ? prBestReps : trueMaxWeight;
+    final goalPredictedValue = isBodyweightLift ? null : predicted1Rm;
     String Function(double)? goalFormatValue;
     if (isBodyweightLift) {
       goalFormatValue = (v) => '${v.round()} reps';
@@ -458,6 +472,7 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
               child: StrengthGoalGauge(
                 tierTargets: goalTierTargets,
                 currentE1rm: goalCurrentValue,
+                predictedValue: goalPredictedValue,
                 formatValue: goalFormatValue,
               ),
             ),

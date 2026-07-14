@@ -7,6 +7,17 @@ import 'package:terpinlift/services/trend_engine.dart';
 SessionWithSets _session(String date, List<LiftSet> sets) =>
     SessionWithSets(LiftSession(exerciseId: 1, date: date), sets);
 
+SessionWithSets _timedSession(String date, {String? startedAt, String? completedAt}) =>
+    SessionWithSets(
+      LiftSession(
+        exerciseId: 1,
+        date: date,
+        startedAt: startedAt,
+        completedAt: completedAt,
+      ),
+      [],
+    );
+
 LiftSet _set({required double weight, int reps = 5, double? rpe}) => LiftSet(
       sessionId: 1,
       setNumber: 0,
@@ -90,6 +101,54 @@ void main() {
       // Should be in the neighborhood of bodyweight-plus-a-little, not the
       // near-zero/negative range plain (unweighted) e1RM would produce.
       expect(low, greaterThan(100));
+    });
+  });
+
+  group('TrendEngine.workoutDurationMinutesByDate', () {
+    test('a session missing either timestamp does not contribute', () {
+      final sessions = [
+        _timedSession('2026-07-10', startedAt: '2026-07-10T10:00:00'),
+        _timedSession('2026-07-11', completedAt: '2026-07-11T10:30:00'),
+      ];
+      expect(TrendEngine.workoutDurationMinutesByDate(sessions), isEmpty);
+    });
+
+    test('computes minutes between started and completed', () {
+      final sessions = [
+        _timedSession(
+          '2026-07-10',
+          startedAt: '2026-07-10T10:00:00',
+          completedAt: '2026-07-10T10:45:00',
+        ),
+      ];
+      expect(TrendEngine.workoutDurationMinutesByDate(sessions)['2026-07-10'], 45);
+    });
+
+    test('multiple sessions on the same date sum together', () {
+      final sessions = [
+        _timedSession(
+          '2026-07-10',
+          startedAt: '2026-07-10T10:00:00',
+          completedAt: '2026-07-10T10:20:00',
+        ),
+        _timedSession(
+          '2026-07-10',
+          startedAt: '2026-07-10T11:00:00',
+          completedAt: '2026-07-10T11:15:00',
+        ),
+      ];
+      expect(TrendEngine.workoutDurationMinutesByDate(sessions)['2026-07-10'], 35);
+    });
+
+    test('a non-positive duration (bad data/clock skew) is dropped, not treated as 0', () {
+      final sessions = [
+        _timedSession(
+          '2026-07-10',
+          startedAt: '2026-07-10T10:30:00',
+          completedAt: '2026-07-10T10:00:00',
+        ),
+      ];
+      expect(TrendEngine.workoutDurationMinutesByDate(sessions), isEmpty);
     });
   });
 }

@@ -19,6 +19,15 @@ abstract class AppColors {
   /// intense/harsh when filling large body-silhouette regions rather than
   /// small UI accents.
   static const Color muscleHigh = Color(0xFFA13A3A);
+
+  /// Discrete readiness bands for the Primed for Growth heatmap
+  /// (`ReadinessBands`) — replaced a continuous dark→green lerp, which
+  /// compressed real score differences (green is the most perceptually
+  /// salient RGB channel, so even a middling score read as "mostly done").
+  static const Color readinessNeedsRest = Color(0xFF12160F); // almost background, a smidge green
+  static const Color readinessRecovering = Color(0xFF262A26); // was needsRest — too bright a step
+  static const Color readinessReady = Color(0xFF3FA75C); // = good
+  static const Color readinessWellRested = Color(0xFF5FE083);
 }
 
 abstract class AppSpacing {

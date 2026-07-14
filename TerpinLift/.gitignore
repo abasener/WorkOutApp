@@ -43,3 +43,13 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Personal/demo data — these live on-device in the app's documents
+# directory and are never part of the repo tree, but ignored here too as a
+# safety net in case a db/export ever gets copied in for local debugging.
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+terpinlift_export*.json
+active_profile.txt

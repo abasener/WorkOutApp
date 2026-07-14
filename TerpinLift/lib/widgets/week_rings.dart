@@ -2,10 +2,12 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 
+import '../services/user_profile.dart';
 import '../theme/app_theme.dart';
 
 /// Replaces the plain checkmark week strip: each day gets a ring that fills
-/// based on % of the 10,000-step goal, with the inside filled in if a
+/// based on % of the daily step goal (`UserProfile.stepsGoal`, adjustable in
+/// Settings — was hardcoded at 10,000), with the inside filled in if a
 /// workout was logged that day. Meant to read as informative progress
 /// rather than a pass/fail checkmark.
 class WeekRings extends StatelessWidget {
@@ -14,20 +16,19 @@ class WeekRings extends StatelessWidget {
 
   const WeekRings({super.key, required this.stepsByDate, required this.workoutDates});
 
-  static const _stepsGoal = 10000.0;
-
   @override
   Widget build(BuildContext context) {
     final today = DateTime.now();
     final days = List.generate(7, (i) => today.subtract(Duration(days: 6 - i)));
     const labels = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+    final stepsGoal = UserProfile.stepsGoal.toDouble();
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: days.map((d) {
         final key = d.toIso8601String().substring(0, 10);
         final steps = stepsByDate[key] ?? 0;
-        final pct = (steps / _stepsGoal).clamp(0.0, 1.0);
+        final pct = (steps / stepsGoal).clamp(0.0, 1.0);
         final worked = workoutDates.contains(key);
 
         return Column(

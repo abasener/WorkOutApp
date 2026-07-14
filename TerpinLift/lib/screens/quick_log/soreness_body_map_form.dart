@@ -148,9 +148,10 @@ class _SorenessBodyMapFormState extends State<SorenessBodyMapForm> {
                   child: Center(child: CircularProgressIndicator(color: AppColors.accent)),
                 )
               else
-                Row(
+                Column(
                   children: [
-                    Expanded(
+                    SizedBox(
+                      width: double.infinity,
                       child: AspectRatio(
                         aspectRatio: 724 / 1448,
                         child: BodyHeatmap(
@@ -163,8 +164,9 @@ class _SorenessBodyMapFormState extends State<SorenessBodyMapForm> {
                         ),
                       ),
                     ),
-                    const SizedBox(width: AppSpacing.standard),
-                    Expanded(
+                    const SizedBox(height: AppSpacing.standard),
+                    SizedBox(
+                      width: double.infinity,
                       child: AspectRatio(
                         aspectRatio: 724 / 1448,
                         child: BodyHeatmap(

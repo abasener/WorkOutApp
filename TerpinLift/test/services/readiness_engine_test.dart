@@ -2,6 +2,7 @@ import 'package:flutter_body_heatmap/flutter_body_heatmap.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:terpinlift/data/models/exercise.dart';
 import 'package:terpinlift/data/models/lift_session.dart';
+import 'package:terpinlift/data/models/lift_set.dart';
 import 'package:terpinlift/data/repositories/lift_repository.dart';
 import 'package:terpinlift/services/readiness_engine.dart';
 
@@ -21,6 +22,23 @@ Exercise _exercise(
 
 SessionWithSets _session(int exerciseId, String date) =>
     SessionWithSets(LiftSession(exerciseId: exerciseId, date: date), []);
+
+/// Newest-first, matching `AppServices.lifts.getAllSessions()`'s ordering —
+/// [rpe]/[weight] describe a single representative set for that session.
+SessionWithSets _ratedSession(String date, {required double weight, double? rpe}) =>
+    SessionWithSets(
+      LiftSession(exerciseId: 1, date: date),
+      [LiftSet(sessionId: 0, setNumber: 1, reps: 5, weight: weight, rpe: rpe)],
+    );
+
+/// Same shape as [_ratedSession] but with an explicit exercise id and reps,
+/// for `volumeSpikeDetected`'s same-exercise-only scoping.
+SessionWithSets _volumeSession(int exerciseId, String date,
+        {required int reps, required double weight}) =>
+    SessionWithSets(
+      LiftSession(exerciseId: exerciseId, date: date),
+      [LiftSet(sessionId: 0, setNumber: 1, reps: reps, weight: weight)],
+    );
 
 void main() {
   group('ReadinessEngine.toBars', () {
@@ -155,6 +173,90 @@ void main() {
       final recency = ReadinessEngine.computePatternRecency([], []);
       expect(recency.keys.toSet(), MovementPattern.values.toSet());
       expect(recency.values.every((v) => v == null), isTrue);
+    });
+  });
+
+  group('ReadinessEngine.trendFatigueDetected', () {
+    test('a big RPE jump on only the 2nd-ever session is not flagged — too little history', () {
+      // Newest-first, matching getAllSessions()'s ordering.
+      final sessions = [
+        _ratedSession('2026-07-10', weight: 100, rpe: 9),
+        _ratedSession('2026-07-08', weight: 100, rpe: 6),
+      ];
+      expect(ReadinessEngine.trendFatigueDetected(sessions), isFalse);
+    });
+
+    test('the same RPE jump is flagged once there is a stable multi-session baseline', () {
+      final sessions = [
+        _ratedSession('2026-07-10', weight: 100, rpe: 9),
+        _ratedSession('2026-07-08', weight: 100, rpe: 6),
+        _ratedSession('2026-07-06', weight: 100, rpe: 6),
+        _ratedSession('2026-07-04', weight: 100, rpe: 6),
+      ];
+      expect(ReadinessEngine.trendFatigueDetected(sessions), isTrue);
+    });
+
+    test('an e1RM dip against the recent-average baseline is flagged at the threshold', () {
+      final sessions = [
+        _ratedSession('2026-07-10', weight: 80, rpe: 7), // well under prior ~100
+        _ratedSession('2026-07-08', weight: 100, rpe: 7),
+        _ratedSession('2026-07-06', weight: 100, rpe: 7),
+        _ratedSession('2026-07-04', weight: 100, rpe: 7),
+      ];
+      expect(ReadinessEngine.trendFatigueDetected(sessions), isTrue);
+    });
+
+    test('ordinary session-to-session variance is not flagged', () {
+      final sessions = [
+        _ratedSession('2026-07-10', weight: 102, rpe: 7),
+        _ratedSession('2026-07-08', weight: 100, rpe: 7),
+        _ratedSession('2026-07-06', weight: 100, rpe: 6.5),
+        _ratedSession('2026-07-04', weight: 98, rpe: 7),
+      ];
+      expect(ReadinessEngine.trendFatigueDetected(sessions), isFalse);
+    });
+  });
+
+  group('ReadinessEngine.volumeSpikeDetected', () {
+    test('below the grace-period session count, never flags a spike', () {
+      final sessions = [
+        _volumeSession(1, '2026-07-10', reps: 10, weight: 200),
+        _volumeSession(1, '2026-07-08', reps: 5, weight: 100),
+      ];
+      expect(ReadinessEngine.volumeSpikeDetected(sessions), isFalse);
+    });
+
+    test('notably higher tonnage than the same exercise\'s recent average is flagged', () {
+      final sessions = [
+        _volumeSession(1, '2026-07-10', reps: 10, weight: 200), // 2000
+        _volumeSession(1, '2026-07-08', reps: 5, weight: 100), // 500
+        _volumeSession(1, '2026-07-06', reps: 5, weight: 100),
+        _volumeSession(1, '2026-07-04', reps: 5, weight: 100),
+      ];
+      expect(ReadinessEngine.volumeSpikeDetected(sessions), isTrue);
+    });
+
+    test('a different exercise\'s higher tonnage in the pooled list is not compared against',
+        () {
+      // Same muscle, different exercise (e.g. Squat vs. Hip Adduction
+      // Machine) — the whole point of scoping to the same exercise.
+      final sessions = [
+        _volumeSession(1, '2026-07-10', reps: 5, weight: 105), // exercise 1, modest
+        _volumeSession(2, '2026-07-09', reps: 10, weight: 300), // exercise 2, huge
+        _volumeSession(1, '2026-07-06', reps: 5, weight: 100), // exercise 1, prior
+        _volumeSession(1, '2026-07-04', reps: 5, weight: 100), // exercise 1, prior
+      ];
+      expect(ReadinessEngine.volumeSpikeDetected(sessions), isFalse);
+    });
+
+    test('ordinary tonnage variance is not flagged', () {
+      final sessions = [
+        _volumeSession(1, '2026-07-10', reps: 5, weight: 105),
+        _volumeSession(1, '2026-07-08', reps: 5, weight: 100),
+        _volumeSession(1, '2026-07-06', reps: 5, weight: 100),
+        _volumeSession(1, '2026-07-04', reps: 5, weight: 100),
+      ];
+      expect(ReadinessEngine.volumeSpikeDetected(sessions), isFalse);
     });
   });
 }

@@ -3,16 +3,25 @@ import 'package:flutter/material.dart';
 import '../services/strength_standards.dart';
 import '../services/units.dart';
 import '../theme/app_theme.dart';
+import 'info_tooltip.dart';
 
 /// Long-arc "main goal" gauge: a filled progress track from 0 up to the
-/// current e1RM, with tick marks at each of the 5 strength-tier thresholds
-/// (bodyweight-ratio standards, gender+age adjusted — see
-/// `StrengthStandards`). Deliberately separate from the near-term
-/// "Predicted Next e1RM Range" box — that's "try for this next," this is
-/// "here's the long-term target you're working toward."
+/// current **true max** (the heaviest you've actually lifted — never
+/// inflated by the Epley formula), with tick marks at each of the 5
+/// strength-tier thresholds (bodyweight-ratio standards, gender+age
+/// adjusted — see `StrengthStandards`). Deliberately separate from the
+/// near-term "Predicted Next e1RM Range" box — that's "try for this next,"
+/// this is "here's the long-term target you're working toward."
 class StrengthGoalGauge extends StatelessWidget {
   final Map<StrengthTier, double> tierTargets;
   final double currentE1rm;
+
+  /// The decayed, Epley-projected 1RM estimate — shown as a second,
+  /// clearly-separate number below the gauge so it never gets mistaken for
+  /// something the user actually lifted. `null` skips that line entirely
+  /// (e.g. the bodyweight-reps variant of this gauge, where "predicted"
+  /// isn't a meaningful concept the same way).
+  final double? predictedValue;
 
   /// Defaults to unit-aware weight formatting; pass an override (e.g. a
   /// rep-count formatter) for bodyweight exercises where the gauge tracks
@@ -23,6 +32,7 @@ class StrengthGoalGauge extends StatelessWidget {
     super.key,
     required this.tierTargets,
     required this.currentE1rm,
+    this.predictedValue,
     this.formatValue,
   });
 
@@ -100,9 +110,22 @@ class StrengthGoalGauge extends StatelessWidget {
             ),
             const SizedBox(height: AppSpacing.standard),
             Text(
-              'Current max: ${format(currentE1rm)}',
+              'True max: ${format(currentE1rm)}',
               style: AppText.smallText,
             ),
+            if (predictedValue != null) ...[
+              const SizedBox(height: AppSpacing.micro),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Predicted 1RM: ${format(predictedValue!)}',
+                    style: AppText.smallText,
+                  ),
+                  const InfoTooltip(glossaryKey: 'predicted_1rm', title: 'Predicted 1RM'),
+                ],
+              ),
+            ],
           ],
         );
       },

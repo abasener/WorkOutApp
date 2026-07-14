@@ -37,6 +37,14 @@ class Glossary {
             "bracket. These are directional, generalized figures — not a "
             "personally measured standard — meant to help guide steady "
             "progress, not to say what you should be able to lift.",
+    'predicted_1rm':
+        "An estimate of your one-rep max, projected from your best recent "
+            "set using the same e1RM formula as elsewhere in the app — not "
+            "something you actually lifted. This is separate from your true "
+            "max above, and it decays over the following months if you stop "
+            "training this lift, so treat it as a rough guide rather than a "
+            "logged number. For the most accurate figure, test your actual "
+            "1RM on lifts you care about from time to time.",
     'strength_goal_bodyweight':
         'A long-term target based on your best plain-bodyweight rep count '
             '(no assistance, no added weight) against commonly cited rep-count '

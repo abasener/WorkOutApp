@@ -73,6 +73,9 @@ class _LiftsScreenState extends State<LiftsScreen> with SingleTickerProviderStat
   final Set<Object> _activeFilters = {}; // ExerciseCategory | ExerciseType
   _LiftSort? _activeSort;
   bool _pinnedOnly = false;
+  bool _searchExpanded = false;
+  String _searchQuery = '';
+  final _searchController = TextEditingController();
 
   @override
   void initState() {
@@ -85,6 +88,7 @@ class _LiftsScreenState extends State<LiftsScreen> with SingleTickerProviderStat
   void dispose() {
     AppServices.reloadSignal.removeListener(_load);
     _tabController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -123,6 +127,14 @@ class _LiftsScreenState extends State<LiftsScreen> with SingleTickerProviderStat
                 ? e.categories.contains(f)
                 : e.equipmentTags.contains(f as ExerciseType));
           }).toList();
+
+    // Search narrows whatever's already visible after filter/pin, never
+    // reaches past it — typing "bench" while a "legs" filter is on should
+    // stay empty, not fall back to searching the whole library.
+    if (_searchQuery.isNotEmpty) {
+      final q = _searchQuery.toLowerCase();
+      list = list.where((e) => e.name.toLowerCase().contains(q)).toList();
+    }
 
     final sort = _activeSort;
     if (sort == null) return list;
@@ -238,50 +250,88 @@ class _LiftsScreenState extends State<LiftsScreen> with SingleTickerProviderStat
     return ListView(
       padding: const EdgeInsets.all(AppSpacing.edge),
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(
-                  side: BorderSide(
-                      color:
-                          _activeFilters.isEmpty ? AppColors.border : AppColors.accent),
-                  foregroundColor:
-                      _activeFilters.isEmpty ? AppColors.textPrimary : AppColors.accent,
-                ),
-                onPressed: _openFilterSheet,
-                icon: const Icon(Icons.filter_list, size: 18),
-                label: Text(_activeFilters.isEmpty
-                    ? 'Filter'
-                    : 'Filter (${_activeFilters.length})'),
+        _searchExpanded
+            ? Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _searchController,
+                      autofocus: true,
+                      style: AppText.bodyText,
+                      decoration: const InputDecoration(
+                        hintText: 'Search lifts…',
+                        isDense: true,
+                      ),
+                      onChanged: (v) => setState(() => _searchQuery = v),
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.small),
+                  IconButton(
+                    tooltip: 'Close search',
+                    onPressed: () => setState(() {
+                      _searchExpanded = false;
+                      _searchQuery = '';
+                      _searchController.clear();
+                    }),
+                    icon: const Icon(Icons.close),
+                    color: AppColors.textSecondary,
+                  ),
+                ],
+              )
+            : Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        side: BorderSide(
+                            color:
+                                _activeFilters.isEmpty ? AppColors.border : AppColors.accent),
+                        foregroundColor:
+                            _activeFilters.isEmpty ? AppColors.textPrimary : AppColors.accent,
+                      ),
+                      onPressed: _openFilterSheet,
+                      icon: const Icon(Icons.filter_list, size: 18),
+                      label: Text(_activeFilters.isEmpty
+                          ? 'Filter'
+                          : 'Filter (${_activeFilters.length})'),
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.small),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        side: BorderSide(
+                            color: _activeSort == null ? AppColors.border : AppColors.accent),
+                        foregroundColor:
+                            _activeSort == null ? AppColors.textPrimary : AppColors.accent,
+                      ),
+                      onPressed: _openSortSheet,
+                      icon: const Icon(Icons.sort, size: 18),
+                      label: Text(_activeSort == null ? 'Sort' : 'Sort: ${_activeSort!.label}'),
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.small),
+                  IconButton(
+                    tooltip: _pinnedOnly ? 'Showing pinned only' : 'Show pinned only',
+                    onPressed: () => setState(() => _pinnedOnly = !_pinnedOnly),
+                    icon: Icon(_pinnedOnly ? Icons.push_pin : Icons.push_pin_outlined),
+                    color: _pinnedOnly ? AppColors.accent : AppColors.textSecondary,
+                    style: IconButton.styleFrom(
+                      side: BorderSide(color: _pinnedOnly ? AppColors.accent : AppColors.border),
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.small),
+                  IconButton(
+                    tooltip: 'Search',
+                    onPressed: () => setState(() => _searchExpanded = true),
+                    icon: const Icon(Icons.search),
+                    color: AppColors.textSecondary,
+                    style: IconButton.styleFrom(
+                      side: const BorderSide(color: AppColors.border),
+                    ),
+                  ),
+                ],
               ),
-            ),
-            const SizedBox(width: AppSpacing.small),
-            Expanded(
-              child: OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(
-                  side: BorderSide(
-                      color: _activeSort == null ? AppColors.border : AppColors.accent),
-                  foregroundColor:
-                      _activeSort == null ? AppColors.textPrimary : AppColors.accent,
-                ),
-                onPressed: _openSortSheet,
-                icon: const Icon(Icons.sort, size: 18),
-                label: Text(_activeSort == null ? 'Sort' : 'Sort: ${_activeSort!.label}'),
-              ),
-            ),
-            const SizedBox(width: AppSpacing.small),
-            IconButton(
-              tooltip: _pinnedOnly ? 'Showing pinned only' : 'Show pinned only',
-              onPressed: () => setState(() => _pinnedOnly = !_pinnedOnly),
-              icon: Icon(_pinnedOnly ? Icons.push_pin : Icons.push_pin_outlined),
-              color: _pinnedOnly ? AppColors.accent : AppColors.textSecondary,
-              style: IconButton.styleFrom(
-                side: BorderSide(color: _pinnedOnly ? AppColors.accent : AppColors.border),
-              ),
-            ),
-          ],
-        ),
         const SizedBox(height: AppSpacing.cardGap),
         if (visible.isEmpty)
           Padding(
@@ -367,11 +417,6 @@ class _LiftsScreenState extends State<LiftsScreen> with SingleTickerProviderStat
       );
     }
 
-    final maxRpeSum = _allSessions
-        .map((s) => s.rpeSum)
-        .fold<double>(0, (a, b) => a > b ? a : b)
-        .clamp(1.0, double.infinity);
-
     final exercisesById = {for (final e in _exercises) if (e.id != null) e.id!: e};
 
     final byDate = <String, List<SessionWithSets>>{};
@@ -380,19 +425,27 @@ class _LiftsScreenState extends State<LiftsScreen> with SingleTickerProviderStat
     }
     final dates = byDate.keys.toList()..sort((a, b) => b.compareTo(a));
 
-    Widget buildRow(SessionWithSets s) => Padding(
-          padding: const EdgeInsets.only(bottom: AppSpacing.cardGap),
-          child: _WorkoutRow(
-            session: s,
-            exerciseName: _exercises
-                .firstWhere((e) => e.id == s.session.exerciseId,
-                    orElse: () => Exercise(
-                        name: 'Unknown', categories: const [], isSeeded: false, created: ''))
-                .name,
-            intensityFraction: (s.rpeSum / maxRpeSum).clamp(0.0, 1.0),
-            onEdit: () => _editSession(s),
-          ),
-        );
+    Widget buildRow(SessionWithSets s) {
+      final exercise = _exercises.firstWhere((e) => e.id == s.session.exerciseId,
+          orElse: () =>
+              Exercise(name: 'Unknown', categories: const [], isSeeded: false, created: ''));
+      return Padding(
+        padding: const EdgeInsets.only(bottom: AppSpacing.cardGap),
+        child: _WorkoutRow(
+          session: s,
+          exerciseName: exercise.name,
+          intensityFraction: ((s.avgRpe ?? 0) / 10).clamp(0.0, 1.0),
+          onEdit: () => _editSession(s),
+          // Tapping the lift itself always goes to that lift's own page —
+          // tapping the workout it's grouped under (the header below) is
+          // what opens the workout page instead.
+          onTap: exercise.id == null
+              ? null
+              : () => Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => LiftDetailScreen(exercise: exercise))),
+        ),
+      );
+    }
 
     return ListView(
       padding: const EdgeInsets.all(AppSpacing.edge),
@@ -420,38 +473,48 @@ class _LiftsScreenState extends State<LiftsScreen> with SingleTickerProviderStat
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 for (final s in ungrouped) buildRow(s),
-                for (final planned in plannedWithLifts) ...[
+                for (final planned in plannedWithLifts)
                   Padding(
-                    padding: const EdgeInsets.only(
-                        top: AppSpacing.micro, bottom: AppSpacing.micro),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            _daysById[planned.templateDayId]?.dayLabel ?? 'Workout',
-                            style: AppText.smallText.copyWith(fontWeight: FontWeight.bold),
+                    padding: const EdgeInsets.only(bottom: AppSpacing.cardGap),
+                    child: Container(
+                      padding: const EdgeInsets.all(AppSpacing.small),
+                      decoration: BoxDecoration(
+                        color: AppColors.accent.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(AppRadius.card),
+                        border: const Border(
+                          left: BorderSide(color: AppColors.accent, width: 3),
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () => _editPlannedSession(planned),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: AppSpacing.micro, vertical: AppSpacing.micro),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      _daysById[planned.templateDayId]?.dayLabel ?? 'Workout',
+                                      style: AppText.smallText
+                                          .copyWith(fontWeight: FontWeight.bold),
+                                    ),
+                                  ),
+                                  const Icon(Icons.edit_outlined,
+                                      size: 18, color: AppColors.textSecondary),
+                                ],
+                              ),
+                            ),
                           ),
-                        ),
-                        GestureDetector(
-                          onTap: () => _editPlannedSession(planned),
-                          child: const Icon(Icons.edit_outlined,
-                              size: 18, color: AppColors.textSecondary),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.only(left: AppSpacing.standard),
-                    decoration: const BoxDecoration(
-                      border: Border(
-                        left: BorderSide(color: AppColors.surfaceRaised, width: 3),
+                          const SizedBox(height: AppSpacing.micro),
+                          for (final s in grouped[planned]!) buildRow(s),
+                        ],
                       ),
                     ),
-                    child: Column(
-                      children: [for (final s in grouped[planned]!) buildRow(s)],
-                    ),
                   ),
-                ],
               ],
             );
           }(),
@@ -612,14 +675,19 @@ class _SortSheet extends StatelessWidget {
 class _WorkoutRow extends StatelessWidget {
   final SessionWithSets session;
   final String exerciseName;
-  final double intensityFraction; // 0-1, relative to hardest logged session
+  final double intensityFraction; // 0-1, this session's average logged RPE / 10
   final VoidCallback onEdit;
+  /// When set (a row inside a grouped workout section), tapping the row body
+  /// opens that workout's page instead of doing nothing — the pencil icon
+  /// still always edits just this one session's sets.
+  final VoidCallback? onTap;
 
   const _WorkoutRow({
     required this.session,
     required this.exerciseName,
     required this.intensityFraction,
     required this.onEdit,
+    this.onTap,
   });
 
   @override
@@ -631,6 +699,7 @@ class _WorkoutRow extends StatelessWidget {
         : session.sets.map((s) => s.weight).reduce((a, b) => a > b ? a : b);
 
     return AppCard(
+      onTap: onTap,
       child: Row(
         children: [
           Container(width: 4, height: 40, color: barColor),

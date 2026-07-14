@@ -33,6 +33,7 @@ abstract final class AppServices {
   static const _genderSettingKey = 'gender';
   static const _birthYearSettingKey = 'birth_year';
   static const _hideWeightSettingKey = 'hide_weight';
+  static const _stepsGoalSettingKey = 'steps_goal';
   static const _homeTrendExerciseIdsKey = 'home_trend_exercise_ids';
   static const _homeTrendMonthsKey = 'home_trend_months';
 
@@ -75,6 +76,9 @@ abstract final class AppServices {
 
     final storedHideWeight = await settings.get(_hideWeightSettingKey);
     Units.hideWeight = storedHideWeight == 'true';
+
+    final storedStepsGoal = await settings.get(_stepsGoalSettingKey);
+    UserProfile.stepsGoal = int.tryParse(storedStepsGoal ?? '') ?? 10000;
 
     final storedTrendIds = await settings.get(_homeTrendExerciseIdsKey);
     HomeTrendSettings.exerciseIds = storedTrendIds
@@ -137,6 +141,12 @@ abstract final class AppServices {
   static Future<void> setHideWeight(bool hide) async {
     Units.hideWeight = hide;
     await settings.set(_hideWeightSettingKey, hide.toString());
+    signalReload();
+  }
+
+  static Future<void> setStepsGoal(int goal) async {
+    UserProfile.stepsGoal = goal;
+    await settings.set(_stepsGoalSettingKey, goal.toString());
     signalReload();
   }
 

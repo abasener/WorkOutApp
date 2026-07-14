@@ -26,9 +26,9 @@ class FlameLevelPicker extends StatelessWidget {
           child: GestureDetector(
             onTap: () => onChanged(level == flameLevel ? 0 : flameLevel),
             child: Icon(
-              Icons.local_fire_department,
+              filled ? Icons.local_fire_department : Icons.local_fire_department_outlined,
               size: 32,
-              color: filled ? AppColors.accent : AppColors.border,
+              color: AppColors.accent,
             ),
           ),
         );

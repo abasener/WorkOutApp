@@ -17,6 +17,8 @@ import '../../widgets/info_tooltip.dart';
 import '../../widgets/labeled_trend_chart.dart';
 import '../../widgets/muscle_status_row.dart';
 import '../../widgets/primed_lifts_row.dart';
+import '../../widgets/readiness_bands.dart';
+import '../../widgets/readiness_calibration_bar.dart';
 import '../../widgets/training_composition_chart.dart';
 import '../../widgets/week_rings.dart';
 import '../lifts/lift_detail_screen.dart';
@@ -262,9 +264,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                 side: BodySide.front,
                                 data: {
                                   for (final entry in _readiness.entries)
-                                    entry.key: MuscleData(intensity: entry.value),
+                                    entry.key:
+                                        MuscleData(color: ReadinessBands.colorFor(entry.value)),
                                 },
-                                colors: const [AppColors.surfaceRaised, AppColors.good],
                                 bodyColor: AppColors.surfaceRaised,
                                 borderColor: AppColors.textSecondary,
                                 showBorder: true,
@@ -279,9 +281,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                 side: BodySide.back,
                                 data: {
                                   for (final entry in _readiness.entries)
-                                    entry.key: MuscleData(intensity: entry.value),
+                                    entry.key:
+                                        MuscleData(color: ReadinessBands.colorFor(entry.value)),
                                 },
-                                colors: const [AppColors.surfaceRaised, AppColors.good],
                                 bodyColor: AppColors.surfaceRaised,
                                 borderColor: AppColors.textSecondary,
                                 showBorder: true,
@@ -292,6 +294,10 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
                   ),
+                  const SizedBox(height: AppSpacing.standard),
+                  // TEMPORARY — remove along with readiness_calibration_bar.dart
+                  // once the heatmap's color bands are calibrated.
+                  const ReadinessCalibrationBar(),
                   const SizedBox(height: AppSpacing.standard),
                   PrimedLiftsRow(
                     lifts: _primedLifts,

@@ -1,6 +1,9 @@
+import 'package:flutter_body_heatmap/flutter_body_heatmap.dart' show Muscle;
+
 import '../data/models/exercise.dart';
 import '../data/models/workout_plan.dart';
 import '../data/repositories/lift_repository.dart';
+import 'readiness_engine.dart';
 
 /// Pure helpers for the Workout Planner's Active Day page — no DB access,
 /// just derivation over already-loaded data. See
@@ -72,5 +75,29 @@ abstract class WorkoutPlanService {
       }
     }
     return result;
+  }
+
+  /// A day's overall readiness (0-5 bars, same scale as `ReadinessEngine.
+  /// toBars`/`ReadinessBars`) for the Day Select list — goes beside the
+  /// plain "N days ago" recency label so days sharing fatigued muscles show
+  /// up even when the *pattern itself* wasn't trained recently (e.g. just
+  /// squatted, so a hinge day is still worth waiting on even though
+  /// deadlift specifically has the longer recency gap — legs/hips overlap).
+  /// Averages `ReadinessEngine.readinessForExercise` across every exercise
+  /// that carries any of the day's patterns, reusing the same muscle-level
+  /// readiness signal the Lifts tab already shows per exercise rather than
+  /// introducing a second readiness model.
+  static int dayReadinessBars(
+    List<MovementPattern> patterns,
+    List<Exercise> exercises,
+    Map<Muscle, double> muscleReadiness,
+  ) {
+    final pool = exercises.where((e) => e.patterns.any(patterns.contains)).toList();
+    if (pool.isEmpty) return 5; // no known exercises to be fatigued by -> nothing holding it back
+    final avg = pool
+            .map((e) => ReadinessEngine.readinessForExercise(e, muscleReadiness))
+            .reduce((a, b) => a + b) /
+        pool.length;
+    return ReadinessEngine.toBars(avg);
   }
 }
