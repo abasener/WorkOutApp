@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_body_heatmap/flutter_body_heatmap.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../data/models/custom_goal.dart';
 import '../../data/models/exercise.dart';
+import '../../data/models/lift_set.dart';
 import '../../data/repositories/lift_repository.dart';
 import '../../services/app_services.dart';
 import '../../services/bodyweight_rep_standards.dart';
@@ -19,9 +21,11 @@ import '../../widgets/info_tooltip.dart';
 import '../../widgets/labeled_trend_chart.dart';
 import '../../widgets/range_indicator.dart';
 import '../../widgets/readiness_segmented_bar.dart';
+import '../../widgets/single_goal_gauge.dart';
 import '../../widgets/strength_goal_gauge.dart';
 import '../quick_log/log_lift_form.dart';
 import 'add_exercise_sheet.dart';
+import 'custom_goal_history_sheet.dart';
 import 'edit_lift_session_form.dart';
 
 class LiftDetailScreen extends StatefulWidget {
@@ -38,6 +42,7 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
   late Exercise _exercise = widget.exercise;
   Map<Muscle, double> _muscleReadiness = {};
   double? _bodyweightLb;
+  List<CustomGoal> _customGoals = [];
 
   @override
   void initState() {
@@ -60,14 +65,125 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
     final exercise = await AppServices.exercises.getById(widget.exercise.id!);
     final muscleReadiness = await ReadinessEngine.computeMuscleReadiness();
     final latestBodyweight = await AppServices.bodyweight.getLatest();
+    final customGoals = await AppServices.customGoals.getAllForExercise(widget.exercise.id!);
     if (!mounted) return;
     setState(() {
       _sessions = sessions;
       if (exercise != null) _exercise = exercise;
       _muscleReadiness = muscleReadiness;
       _bodyweightLb = latestBodyweight?.weight;
+      _customGoals = customGoals;
       _loading = false;
     });
+  }
+
+  Widget _goalSourceChip(String label, GoalSource source, GoalSource? active) {
+    final selected = source == active;
+    return GestureDetector(
+      onTap: () => _setGoalSource(source),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: selected ? AppColors.accent.withValues(alpha: 0.15) : AppColors.surfaceRaised,
+          border: Border.all(color: selected ? AppColors.accent : AppColors.border),
+          borderRadius: BorderRadius.circular(AppRadius.pill),
+        ),
+        child: Text(
+          label,
+          style: AppText.smallText.copyWith(
+            color: selected ? AppColors.accent : AppColors.textSecondary,
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _setGoalSource(GoalSource source) async {
+    final updated = _exercise.goalSource == source
+        ? _exercise.copyWith(clearGoalSource: true)
+        : _exercise.copyWith(goalSource: source);
+    await AppServices.exercises.update(updated);
+    setState(() => _exercise = updated);
+    AppServices.signalReload();
+  }
+
+  Future<void> _editNotes() async {
+    final controller = TextEditingController(text: _exercise.notes ?? '');
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+        child: Container(
+          decoration: const BoxDecoration(
+            color: AppColors.surfaceRaised,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.card)),
+          ),
+          padding: EdgeInsets.fromLTRB(
+            AppSpacing.edge,
+            AppSpacing.standard,
+            AppSpacing.edge,
+            AppSpacing.standard + MediaQuery.of(context).padding.bottom,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Your Notes', style: AppText.subHeader),
+              const SizedBox(height: AppSpacing.standard),
+              TextField(
+                controller: controller,
+                style: AppText.bodyText,
+                maxLines: 6,
+                minLines: 3,
+                autofocus: true,
+                decoration: const InputDecoration(hintText: 'Form cues, reminders, whatever helps.'),
+              ),
+              const SizedBox(height: AppSpacing.large),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.accent,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(AppRadius.button)),
+                  ),
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('Save'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (saved != true) return;
+    final text = controller.text.trim();
+    final updated = text.isEmpty
+        ? _exercise.copyWith(clearNotes: true)
+        : _exercise.copyWith(notes: text);
+    await AppServices.exercises.update(updated);
+    if (!mounted) return;
+    setState(() => _exercise = updated);
+    AppServices.signalReload();
+  }
+
+  Future<void> _openCustomGoalHistory({required bool isBodyweightLift}) async {
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => CustomGoalHistorySheet(
+        exerciseId: _exercise.id!,
+        isBodyweightLift: isBodyweightLift,
+      ),
+    );
+    await _load();
+    AppServices.signalReload();
   }
 
   Future<void> _editExercise() async {
@@ -128,74 +244,68 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
     final useBodyweightE1rm = isBodyweightLift && _bodyweightLb != null;
     double e1rmValueOf(SessionWithSets s) =>
         useBodyweightE1rm ? s.bodyweightAdjustedBestE1rm(_bodyweightLb!) : s.bestE1rm;
+    double Function(LiftSet)? repLoadOf =
+        useBodyweightE1rm ? (set) => _bodyweightLb! + set.weight : null;
 
-    final prediction = TrendEngine.predictNextE1rm(
-      _sessions,
-      valueOf: useBodyweightE1rm ? e1rmValueOf : null,
-    );
-    // Full history here — no 6-month cap, unlike the Home/Metrics dashboards.
-    final e1rmPoints = _sessions.reversed
-        .map((s) => ChartPoint(DateTime.parse(s.session.date), e1rmValueOf(s)))
-        .where((p) => p.value > 0)
-        .toList();
+    // "Next Heavy Set" — what to aim for at the rep count this lift is
+    // usually gone heavy at, projected from recent history at that same rep
+    // count (see `TrendEngine.predictNextAtCharacteristicReps`; no rep-to-1RM
+    // conversion involved, so no formula to get wrong the way the old e1RM
+    // range did on a near-failure multi-rep set).
+    final nextHeavySet = TrendEngine.predictNextAtCharacteristicReps(_sessions, loadOf: repLoadOf);
+
+    // Trend chart: each session's literal heaviest-set weight (bodyweight-
+    // adjusted where relevant) — never a formula estimate — with the rep
+    // count on that set encoded as dot size, and a dashed trend line shaped
+    // by e1RM (comparable across differing rep counts) but re-centered onto
+    // this raw-weight scale. Full history — no 6-month cap, unlike the
+    // Home/Metrics dashboards.
+    final strengthPoints = _sessions.reversed.where((s) => s.sets.isNotEmpty).map((s) {
+      double load(LiftSet set) => useBodyweightE1rm ? _bodyweightLb! + set.weight : set.weight;
+      final heaviest = s.sets.reduce((a, b) => load(a) >= load(b) ? a : b);
+      return ChartPoint(
+        DateTime.parse(s.session.date),
+        load(heaviest),
+        reps: heaviest.reps,
+        trendValue: e1rmValueOf(s),
+      );
+    }).where((p) => p.value > 0).toList();
+
     final daysSince = TrendEngine.daysSinceLastTrained(_sessions);
     final intensity = TrendEngine.lastIntensity(_sessions);
     final musclesHit = MuscleMap.musclesFor(_exercise);
     final muscleData = {for (final m in musclesHit) m: const MuscleData(intensity: 1.0)};
     final readinessBars = ReadinessEngine.toBars(
         ReadinessEngine.readinessForExercise(_exercise, _muscleReadiness));
-    final overview = MuscleMap.liftOverview[_exercise.name];
 
-    // Predicted Next, converted to a rep range at the load the lift was most
-    // recently trained at ("try for this next, at whatever load you're
-    // currently using") — a different axis from the Goal gauge below, which
-    // is deliberately pinned to plain-bodyweight reps to stay comparable to
-    // published standards.
-    (double, double, double)? repsPrediction;
-    if (useBodyweightE1rm && prediction != null) {
-      final recentWithSets = _sessions.where((s) => s.sets.isNotEmpty);
-      final lastSession = recentWithSets.isEmpty ? null : recentWithSets.first;
-      final lastAddedWeight = (lastSession == null || lastSession.sets.isEmpty)
-          ? 0.0
-          : lastSession.sets.map((s) => s.weight).reduce((a, b) => a > b ? a : b);
-      final refLoad = (_bodyweightLb! + lastAddedWeight).clamp(1.0, double.infinity);
-      double toReps(double value) => (30 * (value / refLoad - 1)).clamp(0.0, double.infinity);
-      repsPrediction = (toReps(prediction.$1), toReps(prediction.$2), toReps(prediction.$3));
-    }
+    // Goal gauge's "Predicted 1RM" line — most-recent-history only, no decay
+    // (see `TrendEngine.predictedOneRepMax`). Not a meaningful concept for
+    // the bodyweight-reps variant of this gauge.
+    final predicted1Rm =
+        isBodyweightLift ? null : TrendEngine.predictedOneRepMax(_sessions, gender: UserProfile.gender);
 
-    final sessionsWithE1rm = _sessions.where((s) => e1rmValueOf(s) > 0).toList();
-    SessionWithSets? bestSession;
-    for (final s in sessionsWithE1rm) {
-      if (bestSession == null || e1rmValueOf(s) > e1rmValueOf(bestSession)) bestSession = s;
-    }
-    // The Epley-projected, decayed estimate — kept as a clearly-separate
-    // "Predicted 1RM" number (below), never the gauge's fill/tier position.
-    // That used to be the same number, which read as "the app claims I
-    // lifted 115 when I only ever did 100x4" — an accidental inflation, not
-    // a lie, but confusing without the projection being labeled as such.
-    final predicted1Rm = bestSession == null
-        ? null
-        : StrengthStandards.effectiveBestE1rm(
-            e1rmValueOf(bestSession),
-            DateTime.parse(bestSession.session.date),
-            DateTime.now(),
-          );
     // The gauge's actual fill/tier position: the heaviest weight literally
     // logged on any set, ever — never Epley-projected, never decayed (a PR
     // is a historical fact, it doesn't un-happen if you take time off).
-    // `null` (not 0) when nothing's logged yet, matching `predicted1Rm`'s
-    // null-when-empty so the Goal section's existing gating still applies.
-    final allWeights = _sessions.expand((s) => s.sets).map((set) => set.weight).toList();
-    final trueMaxWeight =
-        allWeights.isEmpty ? null : allWeights.reduce((a, b) => a > b ? a : b);
-    final tierTargets = (_bodyweightLb != null && StrengthStandards.hasStandard(_exercise.name))
-        ? StrengthStandards.allTargets(
-            exerciseName: _exercise.name,
-            bodyweightLb: _bodyweightLb!,
-            gender: UserProfile.gender,
-            ageBucket: UserProfile.ageBucket,
-          )
-        : null;
+    // `null` when nothing's logged yet.
+    LiftSet? trueMaxSet;
+    for (final s in _sessions) {
+      for (final set in s.sets) {
+        if (trueMaxSet == null || set.weight > trueMaxSet.weight) trueMaxSet = set;
+      }
+    }
+    final trueMaxWeight = trueMaxSet?.weight;
+    final trueMaxReps = trueMaxSet?.reps;
+
+    final standardTierTargets =
+        (_bodyweightLb != null && StrengthStandards.hasStandard(_exercise.name))
+            ? StrengthStandards.allTargets(
+                exerciseName: _exercise.name,
+                bodyweightLb: _bodyweightLb!,
+                gender: UserProfile.gender,
+                ageBucket: UserProfile.ageBucket,
+              )
+            : null;
 
     // Goal gauge's rep-count side: pinned to plain-bodyweight sets only
     // (added load == 0), since published pull-up/push-up standards assume
@@ -208,30 +318,48 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
             ageBucket: UserProfile.ageBucket,
           )
         : null;
-    SessionWithSets? bestBodyweightRepSession;
     int bestBodyweightReps = 0;
     for (final s in _sessions) {
       for (final set in s.sets) {
-        if (set.weight == 0 && set.reps > bestBodyweightReps) {
-          bestBodyweightReps = set.reps;
-          bestBodyweightRepSession = s;
-        }
+        if (set.weight == 0 && set.reps > bestBodyweightReps) bestBodyweightReps = set.reps;
       }
     }
-    final prBestReps = bestBodyweightRepSession == null
-        ? null
-        : StrengthStandards.effectiveBestE1rm(
-            bestBodyweightReps.toDouble(),
-            DateTime.parse(bestBodyweightRepSession.session.date),
-            DateTime.now(),
-          );
+    final prBestReps = bestBodyweightReps == 0 ? null : bestBodyweightReps.toDouble();
 
-    final goalTierTargets = isBodyweightLift ? repStandardTargets : tierTargets;
+    final goalStandardTierTargets = isBodyweightLift ? repStandardTargets : standardTierTargets;
     final goalCurrentValue = isBodyweightLift ? prBestReps : trueMaxWeight;
     final goalPredictedValue = isBodyweightLift ? null : predicted1Rm;
     String Function(double)? goalFormatValue;
     if (isBodyweightLift) {
       goalFormatValue = (v) => '${v.round()} reps';
+    }
+
+    // Most recent entry in the goal log decides *whether* the custom-goal
+    // path is even available (see `hasCustomGoal` below) — but the gauge
+    // itself plots every matching entry as its own tick, not just the
+    // newest, so older goals stay visible/nameable on the bar rather than
+    // disappearing the moment a new one is added.
+    final latestCustomGoal = _customGoals.isEmpty ? null : _customGoals.first;
+    final customGoalMarkers = _customGoals
+        .where((g) => isBodyweightLift ? g.targetReps != null : g.targetWeight != null)
+        .map((g) => GoalMarker(
+              value: isBodyweightLift ? g.targetReps!.toDouble() : g.targetWeight!,
+              label: g.label?.isNotEmpty == true ? g.label! : g.created.substring(0, 10),
+            ))
+        .toList();
+    final hasStandardGoal = goalStandardTierTargets != null && goalCurrentValue != null;
+    final hasCustomGoal = goalCurrentValue != null &&
+        latestCustomGoal != null &&
+        (isBodyweightLift
+            ? latestCustomGoal.targetReps != null
+            : latestCustomGoal.targetWeight != null);
+    var effectiveGoalSource = _exercise.goalSource ??
+        (hasStandardGoal ? GoalSource.standard : (hasCustomGoal ? GoalSource.custom : null));
+    if (effectiveGoalSource == GoalSource.standard && !hasStandardGoal) {
+      effectiveGoalSource = hasCustomGoal ? GoalSource.custom : null;
+    }
+    if (effectiveGoalSource == GoalSource.custom && !hasCustomGoal) {
+      effectiveGoalSource = hasStandardGoal ? GoalSource.standard : null;
     }
 
     return Scaffold(
@@ -320,7 +448,7 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
             ],
           ),
           const SizedBox(height: AppSpacing.cardGap),
-          if (prediction != null) ...[
+          if (nextHeavySet != null) ...[
             AppCard(
               padding: _compactPadding,
               child: Column(
@@ -328,26 +456,21 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
                 children: [
                   Row(
                     children: [
-                      Text(
-                        repsPrediction != null
-                            ? 'Predicted Next Rep Range'
-                            : 'Predicted Next e1RM Range',
-                        style: AppText.label,
-                      ),
-                      InfoTooltip(
-                        glossaryKey: 'e1rm',
-                        title: repsPrediction != null
-                            ? 'Predicted Next Rep Range'
-                            : 'Predicted Next e1RM Range',
-                      ),
+                      Text('Next Heavy Set', style: AppText.label),
+                      const InfoTooltip(glossaryKey: 'next_heavy_set', title: 'Next Heavy Set'),
                     ],
+                  ),
+                  const SizedBox(height: AppSpacing.micro),
+                  Text(
+                    'You tend to go heavy for ${nextHeavySet.reps} '
+                    '${nextHeavySet.reps == 1 ? 'rep' : 'reps'} — here\'s a target for next time.',
+                    style: AppText.smallText,
                   ),
                   const SizedBox(height: AppSpacing.standard),
                   RangeIndicator(
-                    low: repsPrediction?.$1 ?? prediction.$1,
-                    goal: repsPrediction?.$2 ?? prediction.$2,
-                    high: repsPrediction?.$3 ?? prediction.$3,
-                    formatValue: repsPrediction != null ? (v) => '${v.round()} reps' : null,
+                    low: nextHeavySet.low,
+                    goal: nextHeavySet.goal,
+                    high: nextHeavySet.high,
                   ),
                 ],
               ),
@@ -401,29 +524,24 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text('Overview', style: AppText.label),
+                        Row(
+                          children: [
+                            Text('Notes', style: AppText.label),
+                            const Spacer(),
+                            GestureDetector(
+                              onTap: _editNotes,
+                              child: const Icon(Icons.edit_outlined,
+                                  size: 16, color: AppColors.textSecondary),
+                            ),
+                          ],
+                        ),
                         const SizedBox(height: AppSpacing.small),
-                        if (overview == null)
-                          Text('No overview added for this movement yet.',
-                              style: AppText.smallText)
-                        else
-                          ...overview.map((cue) => Padding(
-                                padding: const EdgeInsets.only(bottom: AppSpacing.small),
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Icon(cue.kind.icon,
-                                        size: 14,
-                                        color: cue.kind == CueKind.safety
-                                            ? AppColors.warn
-                                            : AppColors.textSecondary),
-                                    const SizedBox(width: AppSpacing.micro),
-                                    Expanded(
-                                      child: Text(cue.text, style: AppText.smallText),
-                                    ),
-                                  ],
-                                ),
-                              )),
+                        Text(
+                          _exercise.notes?.isNotEmpty == true
+                              ? _exercise.notes!
+                              : 'No notes yet — tap the pencil to add your own.',
+                          style: AppText.smallText,
+                        ),
                         if (_exercise.youtubeUrl != null &&
                             _exercise.youtubeUrl!.isNotEmpty) ...[
                           const SizedBox(height: AppSpacing.standard),
@@ -446,17 +564,17 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
             ),
           ),
           const SizedBox(height: AppSpacing.large),
-          Text('e1RM Trend', style: AppText.subHeader),
+          Text('Heavy Set History', style: AppText.subHeader),
           const SizedBox(height: AppSpacing.standard),
           AppCard(
             child: CenteredTrendChart(
-              points: e1rmPoints,
+              points: strengthPoints,
               showPrediction: true,
               trendStyle: TrendStyle.polynomial,
               yLabelFormatter: (v) => Units.format(v),
             ),
           ),
-          if (goalTierTargets != null && goalCurrentValue != null) ...[
+          if (effectiveGoalSource != null) ...[
             const SizedBox(height: AppSpacing.large),
             Row(
               children: [
@@ -465,16 +583,44 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
                   glossaryKey: isBodyweightLift ? 'strength_goal_bodyweight' : 'strength_goal',
                   title: 'Goal',
                 ),
+                const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.tune, size: 18, color: AppColors.textSecondary),
+                  tooltip: 'Your goals',
+                  padding: EdgeInsets.zero,
+                  visualDensity: VisualDensity.compact,
+                  constraints: const BoxConstraints(),
+                  onPressed: () => _openCustomGoalHistory(isBodyweightLift: isBodyweightLift),
+                ),
               ],
             ),
+            if (hasStandardGoal && hasCustomGoal) ...[
+              const SizedBox(height: AppSpacing.small),
+              Row(
+                children: [
+                  _goalSourceChip('Standard', GoalSource.standard, effectiveGoalSource),
+                  const SizedBox(width: AppSpacing.small),
+                  _goalSourceChip('My Goal', GoalSource.custom, effectiveGoalSource),
+                ],
+              ),
+            ],
             const SizedBox(height: AppSpacing.standard),
             AppCard(
-              child: StrengthGoalGauge(
-                tierTargets: goalTierTargets,
-                currentE1rm: goalCurrentValue,
-                predictedValue: goalPredictedValue,
-                formatValue: goalFormatValue,
-              ),
+              child: effectiveGoalSource == GoalSource.custom
+                  ? SingleGoalGauge(
+                      goals: customGoalMarkers,
+                      current: goalCurrentValue!,
+                      currentReps: isBodyweightLift ? null : trueMaxReps,
+                      predictedValue: goalPredictedValue,
+                      formatValue: goalFormatValue,
+                    )
+                  : StrengthGoalGauge(
+                      tierTargets: goalStandardTierTargets!,
+                      currentE1rm: goalCurrentValue!,
+                      predictedValue: goalPredictedValue,
+                      currentReps: isBodyweightLift ? null : trueMaxReps,
+                      formatValue: goalFormatValue,
+                    ),
             ),
           ],
           const SizedBox(height: AppSpacing.large),
@@ -526,3 +672,4 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
     );
   }
 }
+

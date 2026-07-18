@@ -14,6 +14,14 @@ import '../../widgets/flame_level_picker.dart';
 /// sub-splitting" for why this is finer than the original 5 broad
 /// categories, and designFiles/00_UX_DESIGN.md for the original body-map
 /// interaction reasoning (coarser scale, no keyboard).
+///
+/// Tapping a muscle only stages a level locally — nothing hits the database
+/// until the bottom **Save** button is pressed. Dismissing the sheet any
+/// other way (the phone's hardware/gesture back, tapping outside) discards
+/// whatever was staged, same as an abort — there used to be no explicit
+/// save step, so the only way out was the system back gesture, which
+/// silently persisted every tap along the way even though it reads like a
+/// cancel action.
 class SorenessBodyMapForm extends StatefulWidget {
   final DateTime? initialDate;
   const SorenessBodyMapForm({super.key, this.initialDate});
@@ -25,7 +33,9 @@ class SorenessBodyMapForm extends StatefulWidget {
 class _SorenessBodyMapFormState extends State<SorenessBodyMapForm> {
   late DateTime _date = widget.initialDate ?? DateTime.now();
   final Map<SorenessRegion, int> _levels = {};
+  final Set<SorenessRegion> _dirtyRegions = {};
   bool _loading = true;
+  bool _saving = false;
 
   @override
   void initState() {
@@ -82,7 +92,9 @@ class _SorenessBodyMapFormState extends State<SorenessBodyMapForm> {
               ),
               TextButton(
                 onPressed: () => Navigator.pop(ctx, selected),
-                child: const Text('Save', style: TextStyle(color: AppColors.accent)),
+                // "Set", not "Save" — this only stages the level locally,
+                // the bottom Save button is what actually persists it.
+                child: const Text('Set', style: TextStyle(color: AppColors.accent)),
               ),
             ],
           ),
@@ -90,17 +102,25 @@ class _SorenessBodyMapFormState extends State<SorenessBodyMapForm> {
       },
     );
     if (level == null) return;
+    setState(() {
+      _levels[region] = level;
+      _dirtyRegions.add(region);
+    });
+  }
 
-    final type = MetricTypeKey.forSorenessRegion(region);
-    await AppServices.metrics.insert(MetricEntry(
-      date: _dateStr,
-      metricType: type,
-      value: level.toDouble(),
-      loggedAt: DateTime.now().toIso8601String(),
-    ));
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    for (final region in _dirtyRegions) {
+      final type = MetricTypeKey.forSorenessRegion(region);
+      await AppServices.metrics.insert(MetricEntry(
+        date: _dateStr,
+        metricType: type,
+        value: (_levels[region] ?? 0).toDouble(),
+        loggedAt: DateTime.now().toIso8601String(),
+      ));
+    }
     AppServices.signalReload();
-    if (!mounted) return;
-    setState(() => _levels[region] = level);
+    if (mounted) Navigator.pop(context);
   }
 
   @override
@@ -181,6 +201,27 @@ class _SorenessBodyMapFormState extends State<SorenessBodyMapForm> {
                     ),
                   ],
                 ),
+              const SizedBox(height: AppSpacing.large),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.accent,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(AppRadius.button)),
+                  ),
+                  onPressed: _loading || _saving ? null : _save,
+                  child: _saving
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child:
+                              CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      : const Text('Save'),
+                ),
+              ),
             ],
           ),
         ),

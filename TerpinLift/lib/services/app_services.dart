@@ -3,12 +3,17 @@ import 'package:flutter/foundation.dart';
 import '../data/database.dart';
 import '../data/profile_manager.dart';
 import '../data/repositories/bodyweight_repository.dart';
+import '../data/repositories/custom_goal_repository.dart';
+import '../data/repositories/custom_metric_repository.dart';
 import '../data/repositories/cycle_repository.dart';
 import '../data/repositories/exercise_repository.dart';
 import '../data/repositories/lift_repository.dart';
 import '../data/repositories/metrics_repository.dart';
+import '../data/repositories/progress_photo_repository.dart';
 import '../data/repositories/settings_repository.dart';
+import '../data/repositories/todo_repository.dart';
 import '../data/repositories/workout_plan_repository.dart';
+import 'home_layout_settings.dart';
 import 'home_trend_settings.dart';
 import 'test_data_service.dart';
 import 'units.dart';
@@ -23,6 +28,10 @@ abstract final class AppServices {
   static late CycleRepository cycle;
   static late SettingsRepository settings;
   static late WorkoutPlanRepository workoutPlans;
+  static late CustomGoalRepository customGoals;
+  static late CustomMetricRepository customMetrics;
+  static late ProgressPhotoRepository progressPhotos;
+  static late TodoRepository todos;
 
   /// Which data set is currently active — see `ProfileManager`. Exposed as a
   /// listenable so screens (Settings' toggle) can reflect the current state
@@ -34,8 +43,8 @@ abstract final class AppServices {
   static const _birthYearSettingKey = 'birth_year';
   static const _hideWeightSettingKey = 'hide_weight';
   static const _stepsGoalSettingKey = 'steps_goal';
-  static const _homeTrendExerciseIdsKey = 'home_trend_exercise_ids';
   static const _homeTrendMonthsKey = 'home_trend_months';
+  static const _homeWidgetOrderKey = 'home_widget_order';
 
   /// Bump whenever a write happens that other screens should reflect.
   static final reloadSignal = ValueNotifier<int>(0);
@@ -62,6 +71,10 @@ abstract final class AppServices {
     cycle = CycleRepository(db);
     settings = SettingsRepository(db);
     workoutPlans = WorkoutPlanRepository(db);
+    customGoals = CustomGoalRepository(db);
+    customMetrics = CustomMetricRepository(db);
+    progressPhotos = ProgressPhotoRepository(db);
+    todos = TodoRepository(db);
   }
 
   static Future<void> _loadPersistedSettings() async {
@@ -80,15 +93,16 @@ abstract final class AppServices {
     final storedStepsGoal = await settings.get(_stepsGoalSettingKey);
     UserProfile.stepsGoal = int.tryParse(storedStepsGoal ?? '') ?? 10000;
 
-    final storedTrendIds = await settings.get(_homeTrendExerciseIdsKey);
-    HomeTrendSettings.exerciseIds = storedTrendIds
-        ?.split(',')
-        .where((s) => s.isNotEmpty)
-        .map(int.parse)
-        .toList();
-
     final storedTrendMonths = await settings.get(_homeTrendMonthsKey);
     HomeTrendSettings.months = int.tryParse(storedTrendMonths ?? '') ?? 6;
+
+    final storedWidgetOrder = await settings.get(_homeWidgetOrderKey);
+    HomeLayoutSettings.order = storedWidgetOrder
+        ?.split(',')
+        .where((s) => s.isNotEmpty)
+        .map(HomeLayoutItem.fromToken)
+        .whereType<HomeLayoutItem>()
+        .toList();
   }
 
   /// Swaps to the other profile's database file entirely — personal and
@@ -150,15 +164,15 @@ abstract final class AppServices {
     signalReload();
   }
 
-  static Future<void> setHomeTrendExerciseIds(List<int> ids) async {
-    HomeTrendSettings.exerciseIds = ids;
-    await settings.set(_homeTrendExerciseIdsKey, ids.join(','));
-    signalReload();
-  }
-
   static Future<void> setHomeTrendMonths(int months) async {
     HomeTrendSettings.months = months;
     await settings.set(_homeTrendMonthsKey, months.toString());
+    signalReload();
+  }
+
+  static Future<void> setHomeWidgetOrder(List<HomeLayoutItem> order) async {
+    HomeLayoutSettings.order = order;
+    await settings.set(_homeWidgetOrderKey, order.map((i) => i.token).join(','));
     signalReload();
   }
 }

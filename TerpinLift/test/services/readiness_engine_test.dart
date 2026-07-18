@@ -126,6 +126,30 @@ void main() {
       expect(picks.first.name, 'Overhead Press');
     });
 
+    test('excludes a lift that would also hit a muscle needing rest', () {
+      final legPress = Exercise(
+        name: 'Leg Press',
+        categories: const [],
+        isSeeded: true,
+        created: '2026-01-01',
+        targetMuscles: const [Muscle.quadriceps, Muscle.hamstring],
+      );
+      final legExtension = Exercise(
+        name: 'Leg Extension',
+        categories: const [],
+        isSeeded: true,
+        created: '2026-01-01',
+        targetMuscles: const [Muscle.quadriceps],
+      );
+      final readiness = {
+        Muscle.quadriceps: 0.9,
+        Muscle.hamstring: 0.1, // below the rest threshold
+      };
+      final picks = ReadinessEngine.suggestPrimedLifts([legPress, legExtension], readiness);
+      expect(picks.map((e) => e.name), isNot(contains('Leg Press')));
+      expect(picks.map((e) => e.name), contains('Leg Extension'));
+    });
+
     test('respects the maxLifts cap', () {
       final exercises = [
         _exercise('Front Squat'),

@@ -1,4 +1,18 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Progress-photo capture (image_picker's camera source) -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
+    <!-- Checklist reminder notifications (flutter_local_notifications).
+         Deliberately NOT requesting SCHEDULE_EXACT_ALARM/USE_EXACT_ALARM —
+         that's a much heavier, separately-granted permission on Android 12+
+         (a dedicated system settings toggle, not a normal runtime prompt);
+         reminders use inexact scheduling instead, "around" the set time
+         rather than to the second, which is a fine trade for "remind me to
+         bring my water bottle." POST_NOTIFICATIONS is the normal Android 13+
+         runtime prompt; RECEIVE_BOOT_COMPLETED + the two receivers below let
+         a daily-repeating reminder survive a phone restart. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <application
         android:label="terpinlift"
         android:name="${applicationName}"
@@ -30,6 +44,14 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver"/>
+        <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+                <action android:name="android.intent.action.QUICKBOOT_POWERON"/>
+            </intent-filter>
+        </receiver>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

@@ -1,12 +1,20 @@
 import 'dart:math';
 
+import 'package:flutter/material.dart';
+
 import '../data/models/bodyweight_entry.dart';
+import '../data/models/custom_metric.dart';
+import '../data/models/custom_metric_entry.dart';
 import '../data/models/cycle_entry.dart';
 import '../data/models/exercise.dart';
 import '../data/models/lift_set.dart';
 import '../data/models/metric_entry.dart';
+import '../data/models/progress_photo.dart';
+import '../data/models/workout_plan.dart';
 import 'app_services.dart';
+import 'placeholder_image_generator.dart';
 import 'training_composition_service.dart';
+import 'user_profile.dart';
 
 /// Generates ~2 months of plausible (not real) workout/metric history so the
 /// dashboard, trend lines, and predictions can be reviewed with realistic
@@ -70,9 +78,22 @@ class TestDataService {
 
   static Future<void> load() async {
     await AppServices.db.wipeEverythingAndReseed();
+    await AppServices.workoutPlans.deleteAllSessions();
     final allExercises = await AppServices.exercises.getAll();
     final exercises =
         allExercises.where((e) => _routineExerciseNames.contains(e.name)).toList();
+
+    // Workout Planner demo data — a real `PlannedSession` for roughly half
+    // of gym days (see `isGymDay` below), rotating through the seeded
+    // default template's days, so the Workouts tab, Active Day's view/edit
+    // mode, and the Workout Duration chart's planned-session-priority path
+    // (`TrendEngine.workoutDurationMinutesByDate`) all have something real
+    // to show — previously demo data only ever wrote raw `lift_sessions`
+    // rows, which meant the entire Workout Planner surface looked unused.
+    final defaultTemplate = await AppServices.workoutPlans.getDefaultTemplate();
+    final templateDays = defaultTemplate == null
+        ? <WorkoutTemplateDay>[]
+        : await AppServices.workoutPlans.getDaysForTemplate(defaultTemplate.id!);
 
     const totalDays = 60;
     final today = DateTime.now();
@@ -149,6 +170,23 @@ class TestDataService {
             }
           }
         }
+
+        // Roughly half of gym days also get a real Workout Planner session
+        // (not just the raw lift logs above) — a completed `PlannedSession`
+        // tied to the seeded default template, started ~7pm with a plausible
+        // 40-80 minute span, rotating through the template's days in order.
+        if (templateDays.isNotEmpty && _rand.nextDouble() < 0.5) {
+          final day = templateDays[offset % templateDays.length];
+          final startedAt = DateTime(date.year, date.month, date.day, 19, _rand.nextInt(45));
+          final completedAt = startedAt.add(Duration(minutes: 40 + _rand.nextInt(41)));
+          await AppServices.workoutPlans.insertSession(PlannedSession(
+            templateDayId: day.id!,
+            date: dateStr,
+            startedAt: startedAt.toIso8601String(),
+            completedAt: completedAt.toIso8601String(),
+            status: PlannedSessionStatus.completed,
+          ));
+        }
       }
 
       await _writeSoreness(offset, dateStr, loggedAt, sorenessEvents, onPeriod);
@@ -163,9 +201,90 @@ class TestDataService {
       }
     }
 
-    await _loadCycleData(start);
+    // Cycle demo data only makes sense for the female-gender setting — the
+    // whole feature is scoped there (`00_UX_DESIGN.md`), and generating it
+    // for a male-set profile would just be irrelevant synthetic noise.
+    if (UserProfile.gender == Gender.female) {
+      await _loadCycleData(start);
+    }
+    await _loadProgressPhotos(start);
+    await _loadCustomMetrics(start);
 
     AppServices.signalReload();
+  }
+
+  /// A handful of synthetic progress photos spread across the demo window —
+  /// obviously can't fake a real photo, so each is just a plain black square
+  /// with a simple white icon drawn on it (`PlaceholderImageGenerator`).
+  /// Single-photo days are spaced out to look like periodic check-ins; a few
+  /// days deliberately get 2-3 photos (different angles/poses) so the
+  /// album's stacked-pile tile has real multi-photo cases to test, not just
+  /// one. Icons cycle across the *whole* sequence (not reset per day), so a
+  /// multi-photo day's pile shows visibly different icons per photo rather
+  /// than the same one repeated. Old demo photos are cleared first so
+  /// reloading test data doesn't just keep stacking up more of them.
+  static const _progressPhotoIcons = [
+    Icons.fitness_center,
+    Icons.emoji_events,
+    Icons.trending_up,
+    Icons.self_improvement,
+    Icons.bolt,
+  ];
+
+  static Future<void> _loadProgressPhotos(DateTime start) async {
+    await AppServices.progressPhotos.deleteAll();
+    const offsets = [3, 17, 24, 24, 24, 31, 38, 38, 45, 52, 58];
+    // How many photos already landed on this same offset (for the 24/38
+    // repeats above) — staggers same-day timestamps by an hour each,
+    // otherwise every photo on a multi-photo demo day shares the exact same
+    // `taken_at` and has no real chronological order within that day.
+    var sameOffsetCount = 0;
+    for (var i = 0; i < offsets.length; i++) {
+      if (i > 0 && offsets[i] == offsets[i - 1]) {
+        sameOffsetCount++;
+      } else {
+        sameOffsetCount = 0;
+      }
+      final date = start.add(Duration(days: offsets[i]));
+      final icon = _progressPhotoIcons[i % _progressPhotoIcons.length];
+      final bytes = await PlaceholderImageGenerator.generate(icon);
+      final path = await AppServices.progressPhotos.storeBytes(bytes);
+      await AppServices.progressPhotos.insert(ProgressPhoto(
+        date: _fmt(date),
+        filePath: path,
+        takenAt:
+            DateTime(date.year, date.month, date.day, 8 + sameOffsetCount).toIso8601String(),
+      ));
+    }
+  }
+
+  /// A single "Mood" custom metric (classes kind, once-per-day) with entries
+  /// roughly every 4 days across the window — proves out the metric-builder
+  /// feature end to end with real-looking data, rather than it only ever
+  /// being tested empty. Any pre-existing custom metrics are cleared first,
+  /// same "test data replaces everything" convention as the rest of this
+  /// generator.
+  static Future<void> _loadCustomMetrics(DateTime start) async {
+    final existing = await AppServices.customMetrics.getAllDefinitions();
+    for (final metric in existing) {
+      await AppServices.customMetrics.deleteDefinition(metric.id!);
+    }
+    final moodId = await AppServices.customMetrics.insertDefinition(CustomMetric(
+      name: 'Mood',
+      kind: CustomMetricKind.classes,
+      classLabels: const ['😞 Sad', '🙁 Down', '😐 Neutral', '🙂 Good', '😄 Great'],
+      created: DateTime.now().toIso8601String(),
+      allowMultiplePerDay: false,
+    ));
+    for (var offset = 0; offset <= 60; offset += 4) {
+      final date = start.add(Duration(days: offset));
+      await AppServices.customMetrics.insertEntry(CustomMetricEntry(
+        customMetricId: moodId,
+        date: _fmt(date),
+        value: _rand.nextInt(5).toDouble(),
+        loggedAt: DateTime(date.year, date.month, date.day, 8).toIso8601String(),
+      ));
+    }
   }
 
   /// DOMS-style delayed soreness: a training event contributes least on the

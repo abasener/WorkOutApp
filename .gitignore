@@ -1,0 +1,6 @@
+# Personal reference data — real logged lift/health data pulled from the
+# app for debugging/discussion, never meant to be public.
+/reference-data/
+
+# Generic starter-template reference doc, not project-specific.
+flutter_starter_bundle.md

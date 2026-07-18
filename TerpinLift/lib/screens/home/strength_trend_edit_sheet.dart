@@ -1,32 +1,40 @@
 import 'package:flutter/material.dart';
 
 import '../../data/models/exercise.dart';
-import '../../services/app_services.dart';
 import '../../theme/app_theme.dart';
 
-/// Lets the user pick exactly which lifts' trend charts show in Home's
-/// "Strength Trends" section, and how many months of history each one
-/// plots. Reached via the edit pencil next to that section's header.
-class HomeTrendPickerSheet extends StatefulWidget {
+/// Picks which single lift a Strength Trend card tracks, plus the shared
+/// "how far back" months setting. One card, one lift — unlike the old
+/// combined multi-select sheet, this is reached per-card and only from
+/// Home's edit mode (see designFiles/02_SCREEN_home.md "Strength Trend
+/// widgets"). Returns `(exerciseId, months)` on Save.
+class StrengthTrendEditSheet extends StatefulWidget {
   final List<Exercise> exercises;
-  final Set<int> selectedIds;
+  final int? selectedId;
+  final Set<int> excludeIds;
   final int months;
 
-  const HomeTrendPickerSheet({
+  const StrengthTrendEditSheet({
     super.key,
     required this.exercises,
-    required this.selectedIds,
+    required this.selectedId,
+    required this.excludeIds,
     required this.months,
   });
 
   @override
-  State<HomeTrendPickerSheet> createState() => _HomeTrendPickerSheetState();
+  State<StrengthTrendEditSheet> createState() => _StrengthTrendEditSheetState();
 }
 
-class _HomeTrendPickerSheetState extends State<HomeTrendPickerSheet> {
-  late final Set<int> _selected = {...widget.selectedIds};
+class _StrengthTrendEditSheetState extends State<StrengthTrendEditSheet> {
+  int? _selected;
   late final _monthsController = TextEditingController(text: widget.months.toString());
-  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _selected = widget.selectedId;
+  }
 
   @override
   void dispose() {
@@ -34,20 +42,18 @@ class _HomeTrendPickerSheetState extends State<HomeTrendPickerSheet> {
     super.dispose();
   }
 
-  Future<void> _save() async {
-    setState(() => _saving = true);
+  void _save() {
+    final selected = _selected;
+    if (selected == null) return;
     final months = int.tryParse(_monthsController.text) ?? widget.months;
-    await AppServices.setHomeTrendExerciseIds(_selected.toList());
-    await AppServices.setHomeTrendMonths(months.clamp(1, 999));
-    if (mounted) Navigator.pop(context);
+    Navigator.pop(context, (selected, months.clamp(1, 999)));
   }
 
   @override
   Widget build(BuildContext context) {
-    // Pinned lifts (the ones actually trained regularly) surface first —
-    // same ordering logic as the quick-log dropdown, just not filtered down
-    // to only pinned since any lift can still be charted here.
-    final sorted = [...widget.exercises]
+    final options = widget.exercises
+        .where((e) => e.id != null && (e.id == widget.selectedId || !widget.excludeIds.contains(e.id)))
+        .toList()
       ..sort((a, b) {
         if (a.pinned != b.pinned) return a.pinned ? -1 : 1;
         return a.name.compareTo(b.name);
@@ -71,7 +77,7 @@ class _HomeTrendPickerSheetState extends State<HomeTrendPickerSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Strength Trends', style: AppText.subHeader),
+            Text('Strength Trend', style: AppText.subHeader),
             const SizedBox(height: AppSpacing.standard),
             Row(
               children: [
@@ -89,25 +95,23 @@ class _HomeTrendPickerSheetState extends State<HomeTrendPickerSheet> {
             ),
             const SizedBox(height: AppSpacing.small),
             Text(
-              'If a lift has less history than this, it just shows everything it has.',
+              'Applies to every Strength Trend card, not just this one.',
               style: AppText.smallText,
             ),
             const SizedBox(height: AppSpacing.standard),
-            Text('Lifts to chart', style: AppText.label),
+            Text('Which lift', style: AppText.label),
             Flexible(
               child: ListView(
                 shrinkWrap: true,
-                children: sorted.map((e) {
-                  final selected = e.id != null && _selected.contains(e.id);
-                  return CheckboxListTile(
-                    value: selected,
-                    onChanged: (v) {
-                      if (e.id == null) return;
-                      setState(() => v == true ? _selected.add(e.id!) : _selected.remove(e.id!));
-                    },
-                    activeColor: AppColors.accent,
+                children: options.map((e) {
+                  final selected = e.id == _selected;
+                  return ListTile(
+                    onTap: () => setState(() => _selected = e.id),
                     contentPadding: EdgeInsets.zero,
-                    controlAffinity: ListTileControlAffinity.leading,
+                    leading: Icon(
+                      selected ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                      color: selected ? AppColors.accent : AppColors.textSecondary,
+                    ),
                     title: Row(
                       children: [
                         Flexible(child: Text(e.name, style: AppText.bodyText)),
@@ -132,13 +136,8 @@ class _HomeTrendPickerSheetState extends State<HomeTrendPickerSheet> {
                   shape:
                       RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.button)),
                 ),
-                onPressed: _saving ? null : _save,
-                child: _saving
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Text('Save'),
+                onPressed: _selected == null ? null : _save,
+                child: const Text('Save'),
               ),
             ),
           ],

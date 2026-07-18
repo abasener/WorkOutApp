@@ -8,6 +8,7 @@ import '../../services/effort_display.dart';
 import '../../services/units.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/date_picker_field.dart';
+import '../../widgets/exercise_picker_field.dart';
 import '../../widgets/info_tooltip.dart';
 
 class _EditableSet {
@@ -40,6 +41,36 @@ class _EditLiftSessionFormState extends State<EditLiftSessionForm> {
       .map((s) => _EditableSet(reps: s.reps, weightLb: s.weight, rpe: s.rpe))
       .toList();
   bool _saving = false;
+  late Exercise _selectedExercise = widget.exercise;
+  List<Exercise> _allExercises = [];
+  List<Exercise> _defaultExerciseOptions = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadExerciseOptions();
+  }
+
+  Future<void> _loadExerciseOptions() async {
+    final all = await AppServices.exercises.getAll();
+    // Pinned exercises are the default/short list shown before typing —
+    // anything off the beaten path is reachable by typing a search term
+    // (`ExercisePickerField` searches the full library once there's text).
+    final pinned = all.where((e) => e.pinned).toList();
+    final options = pinned.any((e) => e.id == widget.exercise.id)
+        ? pinned
+        : [widget.exercise, ...pinned];
+    if (!mounted) return;
+    setState(() {
+      _allExercises = all;
+      _defaultExerciseOptions = options;
+      // Re-point at the instance from `all` itself (not the original
+      // `widget.exercise`) — a fresh DB fetch never returns the same object
+      // instance twice, and this screen otherwise carries the stale one.
+      _selectedExercise =
+          all.firstWhere((e) => e.id == widget.exercise.id, orElse: () => widget.exercise);
+    });
+  }
 
   @override
   void dispose() {
@@ -51,6 +82,7 @@ class _EditLiftSessionFormState extends State<EditLiftSessionForm> {
     setState(() => _saving = true);
     final dateStr = _date.toIso8601String().substring(0, 10);
     await AppServices.lifts.updateSession(widget.sessionWithSets.session.copyWith(
+      exerciseId: _selectedExercise.id,
       date: dateStr,
       notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
     ));
@@ -123,7 +155,24 @@ class _EditLiftSessionFormState extends State<EditLiftSessionForm> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Edit ${widget.exercise.name}', style: AppText.subHeader),
+              Text('Edit Session', style: AppText.subHeader),
+              const SizedBox(height: AppSpacing.standard),
+              // Only rendered once options are loaded, so the picker's first
+              // build already has real items — avoids a stale initial value
+              // or an empty options list on first frame.
+              if (_allExercises.isEmpty)
+                TextFormField(
+                  enabled: false,
+                  initialValue: _selectedExercise.name,
+                  decoration: const InputDecoration(labelText: 'Exercise'),
+                )
+              else
+                ExercisePickerField(
+                  allOptions: _allExercises,
+                  defaultOptions: _defaultExerciseOptions,
+                  selected: _selectedExercise,
+                  onSelected: (e) => setState(() => _selectedExercise = e),
+                ),
               const SizedBox(height: AppSpacing.standard),
               DatePickerField(date: _date, onChanged: (d) => setState(() => _date = d)),
               const SizedBox(height: AppSpacing.large),

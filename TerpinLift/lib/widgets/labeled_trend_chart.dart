@@ -6,7 +6,25 @@ import '../theme/app_theme.dart';
 class ChartPoint {
   final DateTime date;
   final double value;
-  const ChartPoint(this.date, this.value);
+
+  /// Rep count this point represents, if any — encoded as dot size (1 rep =
+  /// smallest, 21+ reps = largest) so a chart mixing rep ranges (e.g. a
+  /// heavy-single day next to a high-rep day) reads as "that one's odd
+  /// because it was a different rep range," not just noise. `null` draws the
+  /// default fixed-size dot.
+  final int? reps;
+
+  /// An alternate series used only to shape the dashed trend line — e.g. a
+  /// gender-scaled e1RM estimate, when [value] itself is a raw weight that
+  /// isn't comparable point-to-point (different rep counts each session).
+  /// `null` fits the trend line on [value] directly (the original behavior).
+  /// The fitted curve is shifted to sit centered on the actual [value] data
+  /// rather than plotted on its own scale, so it never reads as "off the
+  /// chart" — its *shape* reflects this alternate series, its *position*
+  /// stays anchored to what's actually plotted.
+  final double? trendValue;
+
+  const ChartPoint(this.date, this.value, {this.reps, this.trendValue});
 }
 
 /// A `LabeledTrendChart` sized to a fixed width:height aspect ratio (taller
@@ -189,6 +207,20 @@ class _ChartPainter extends CustomPainter {
 
     final xs = points.map((p) => p.date.difference(firstDate).inDays.toDouble()).toList();
     final ys = points.map((p) => p.value).toList();
+    // Fit the trend line's shape on `trendValue` when provided (e.g. e1RM,
+    // comparable across different rep counts), falling back to `value`
+    // itself otherwise — see [ChartPoint.trendValue].
+    final trendYs = points.map((p) => p.trendValue ?? p.value).toList();
+    // The fitted curve is computed on `trendYs`, which can be a totally
+    // different axis than the raw `value`s actually being plotted (e.g. an
+    // e1RM estimate vs. a raw per-session weight) — shift the whole curve by
+    // a constant so it ends up centered on the real data instead of floating
+    // off to one side or past the chart's own bounds. A no-op (0) when no
+    // point supplies a `trendValue`.
+    final shift = points.any((p) => p.trendValue != null)
+        ? (ys.reduce((a, b) => a + b) / ys.length) -
+            (trendYs.reduce((a, b) => a + b) / trendYs.length)
+        : 0.0;
 
     // Trend curve: a list of (x, y) samples to connect with dashed segments
     // across the historical range, plus one more point at totalSpanDays if
@@ -197,12 +229,12 @@ class _ChartPainter extends CustomPainter {
     final double predictedEndValue;
     switch (trendStyle) {
       case TrendStyle.movingAverage:
-        final smoothed = _trailingMovingAverage(xs, ys, trendWindowDays);
-        trendCurve = [for (var i = 0; i < xs.length; i++) (xs[i], smoothed[i])];
+        final smoothed = _trailingMovingAverage(xs, trendYs, trendWindowDays);
+        trendCurve = [for (var i = 0; i < xs.length; i++) (xs[i], smoothed[i] + shift)];
         final slope = _trailingSlope(xs, smoothed, trendWindowDays);
-        predictedEndValue = smoothed.last + slope * (totalSpanDays - xs.last);
+        predictedEndValue = smoothed.last + slope * (totalSpanDays - xs.last) + shift;
       case TrendStyle.polynomial:
-        final coeffs = _fitBestPolynomial(xs, ys);
+        final coeffs = _fitBestPolynomial(xs, trendYs);
         double curveAt(double x) => _evalPoly(coeffs, x);
         double derivativeAt(double x) => _evalPolyDerivative(coeffs, x);
         const samples = 40;
@@ -210,11 +242,11 @@ class _ChartPainter extends CustomPainter {
           for (var i = 0; i <= samples; i++)
             (
               xs.first + (xs.last - xs.first) * i / samples,
-              curveAt(xs.first + (xs.last - xs.first) * i / samples),
+              curveAt(xs.first + (xs.last - xs.first) * i / samples) + shift,
             ),
         ];
         final tangentSlope = derivativeAt(xs.last);
-        predictedEndValue = curveAt(xs.last) + tangentSlope * (totalSpanDays - xs.last);
+        predictedEndValue = curveAt(xs.last) + tangentSlope * (totalSpanDays - xs.last) + shift;
     }
 
     // Domain is based on the actual logged data only — NOT the trend curve or
@@ -307,8 +339,20 @@ class _ChartPainter extends CustomPainter {
         ..strokeCap = StrokeCap.round,
     );
     for (final p in points) {
-      canvas.drawCircle(Offset(xOf(p.date), yOf(p.value)), 3.5, Paint()..color = color);
+      canvas.drawCircle(Offset(xOf(p.date), yOf(p.value)), _dotRadius(p.reps), Paint()..color = color);
     }
+  }
+
+  /// Dot radius encoding rep count — 1 rep is the smallest dot, 21+ reps the
+  /// largest, so a chart mixing rep ranges reads as "that point's low
+  /// because it was a high-rep day," not just an unexplained outlier.
+  /// `null` (no rep count on this point) draws the original fixed size.
+  static const _minDotRadius = 3.0;
+  static const _maxDotRadius = 9.0;
+  double _dotRadius(int? reps) {
+    if (reps == null) return 3.5;
+    final t = ((reps - 1) / 20).clamp(0.0, 1.0);
+    return _minDotRadius + (_maxDotRadius - _minDotRadius) * t;
   }
 
   /// Trailing moving average: at each point i, the mean of all points whose

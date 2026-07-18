@@ -401,11 +401,17 @@ class ReadinessEngine {
   /// get suggested — the second one only earns a slot if it covers primed
   /// muscles the first one didn't. A guide toward good options, not a
   /// prescription ("here's what covers what's primed," not "do this").
+  /// Candidates are excluded outright if they'd also work a muscle below
+  /// [restThreshold] (same cutoff as `ReadinessBands`' "Needs rest" band,
+  /// kept in sync by convention rather than a shared import across the
+  /// service/widget layers) — a lift shouldn't get suggested here just
+  /// because it happens to also hit something sore or overreaching.
   static List<Exercise> suggestPrimedLifts(
     List<Exercise> exercises,
     Map<Muscle, double> muscleReadiness, {
-    int maxLifts = 5,
+    int maxLifts = 4,
     double primedThreshold = 0.6,
+    double restThreshold = 0.3,
   }) {
     final primedMuscles = {
       for (final entry in muscleReadiness.entries)
@@ -415,7 +421,9 @@ class ReadinessEngine {
 
     final covered = <Muscle>{};
     final picks = <Exercise>[];
-    final remaining = [...exercises];
+    final remaining = exercises
+        .where((e) => MuscleMap.musclesFor(e).every((m) => (muscleReadiness[m] ?? 1.0) >= restThreshold))
+        .toList();
 
     while (picks.length < maxLifts && remaining.isNotEmpty) {
       Exercise? best;

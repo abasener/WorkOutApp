@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../data/profile_manager.dart';
 import '../../services/app_services.dart';
@@ -34,8 +35,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final path = await BackupService.exportToFile();
     setState(() => _busy = false);
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Exported to $path')),
+    // Opens the OS share sheet (email, Drive, Files, etc.) instead of just
+    // writing to the app's private documents folder and reporting a path
+    // the user has no normal way to browse to on Android.
+    await SharePlus.instance.share(
+      ShareParams(files: [XFile(path)], subject: 'TerpinLift export'),
     );
   }
 

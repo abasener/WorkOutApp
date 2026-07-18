@@ -2,17 +2,27 @@ import 'package:flutter/material.dart';
 import 'package:flutter_body_heatmap/flutter_body_heatmap.dart';
 
 import '../../data/models/bodyweight_entry.dart';
+import '../../data/models/custom_metric.dart';
+import '../../data/models/custom_metric_entry.dart';
 import '../../data/models/metric_entry.dart';
+import '../../data/models/progress_photo.dart';
 import '../../services/app_services.dart';
+import '../../services/metric_chart_points.dart';
 import '../../services/muscle_map.dart';
 import '../../services/trend_engine.dart';
 import '../../services/units.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/app_card.dart';
 import '../../widgets/labeled_trend_chart.dart';
+import '../../widgets/progress_photo_timeline.dart';
 import '../quick_log/log_simple_metric_form.dart';
 import '../quick_log/soreness_body_map_form.dart';
+import 'custom_metric_builder_sheet.dart';
+import 'custom_metric_entry_sheet.dart';
+import 'custom_metric_history_sheet.dart';
 import 'cycle_detail_screen.dart';
+import 'metric_history_sheet.dart';
+import 'progress_photos_screen.dart';
 
 const _dashboardHistoryDays =
     183; // ~6 months, per designFiles/05_SCREEN_metrics.md
@@ -38,6 +48,9 @@ class _MetricsScreenState extends State<MetricsScreen>
   int _cycleFlowDaysCount = 0;
   final Map<SorenessRegion, int> _latestSoreness = {};
   Map<String, double> _workoutDurationByDate = {};
+  List<ProgressPhoto> _progressPhotos = [];
+  List<CustomMetric> _customMetrics = [];
+  final Map<int, List<CustomMetricEntry>> _customMetricEntries = {};
 
   @override
   void initState() {
@@ -62,7 +75,11 @@ class _MetricsScreenState extends State<MetricsScreen>
     final bodyweight = await AppServices.bodyweight.getAll();
     final flowEntries = await AppServices.cycle.getFlowEntries();
     final liftSessions = await AppServices.lifts.getAllSessions();
-    final workoutDurationByDate = TrendEngine.workoutDurationMinutesByDate(liftSessions);
+    final plannedSessions = await AppServices.workoutPlans.getAllSessions();
+    final workoutDurationByDate = TrendEngine.workoutDurationMinutesByDate(
+      liftSessions,
+      plannedSessions: plannedSessions,
+    );
 
     final soreness = <SorenessRegion, int>{};
     for (final region in MuscleMap.sorenessRegionGroups.keys) {
@@ -70,6 +87,13 @@ class _MetricsScreenState extends State<MetricsScreen>
         MetricTypeKey.forSorenessRegion(region),
       );
       if (latest != null) soreness[region] = latest.value.round();
+    }
+
+    final progressPhotos = await AppServices.progressPhotos.getAll();
+    final customMetrics = await AppServices.customMetrics.getAllDefinitions();
+    final customMetricEntries = <int, List<CustomMetricEntry>>{};
+    for (final metric in customMetrics) {
+      customMetricEntries[metric.id!] = await AppServices.customMetrics.getEntries(metric.id!);
     }
 
     if (!mounted) return;
@@ -86,8 +110,92 @@ class _MetricsScreenState extends State<MetricsScreen>
         ..clear()
         ..addAll(soreness);
       _workoutDurationByDate = workoutDurationByDate;
+      _progressPhotos = progressPhotos;
+      _customMetrics = customMetrics;
+      _customMetricEntries
+        ..clear()
+        ..addAll(customMetricEntries);
       _loading = false;
     });
+  }
+
+  /// The "+" icon on a built-in metric card — same form the quick-log FAB
+  /// uses, just skipping the FAB's type picker since the card already says
+  /// which metric this is.
+  Future<void> _logSimpleMetric(SimpleMetricKind kind) async {
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => LogSimpleMetricForm(kind: kind),
+    );
+  }
+
+  /// The notebook icon on every metric card — a popup listing just that
+  /// metric's own entries (newest first), not a jump to the mixed Days tab.
+  /// Less discoverable than a tab, but the user's own call: this is "the
+  /// easy place to see all the exact numbers/tags" for one metric at a
+  /// time, which the Days tab's everything-by-date layout doesn't give you.
+  Future<void> _showMetricHistory(String title, List<MetricHistoryRow> rows) async {
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => MetricHistorySheet(title: title, rows: rows),
+    );
+  }
+
+  List<MetricHistoryRow> _stepsHistoryRows() => (_entries[MetricType.steps] ?? [])
+      .map((e) => MetricHistoryRow(
+            date: e.date,
+            valueText: e.value.round().toString(),
+            onEdit: () => _editSimpleMetric(SimpleMetricKind.steps, e),
+          ))
+      .toList();
+
+  List<MetricHistoryRow> _sleepHistoryRows() => (_entries[MetricType.sleepHours] ?? [])
+      .map((e) => MetricHistoryRow(
+            date: e.date,
+            valueText: '${e.value.toStringAsFixed(1)} hrs',
+            onEdit: () => _editSimpleMetric(SimpleMetricKind.sleep, e),
+          ))
+      .toList();
+
+  List<MetricHistoryRow> _weightHistoryRows() => _bodyweight
+      .map((e) => MetricHistoryRow(
+            date: e.date,
+            valueText: Units.formatMaskable(e.weight),
+            onEdit: () => _editBodyweight(e),
+          ))
+      .toList();
+
+  /// Derived, not logged — no `onEdit` on any row, since there's no single
+  /// entry behind a given date's number to correct (it's the planned-
+  /// session span, or a sum of lift Track Time windows).
+  List<MetricHistoryRow> _workoutDurationHistoryRows() => _workoutDurationByDate.entries
+      .map((e) => MetricHistoryRow(date: e.key, valueText: '${e.value.round()}m'))
+      .toList();
+
+  /// Same per-day region grouping the Days tab uses for soreness, just
+  /// rendered as this metric's own popup instead of mixed in with everything
+  /// else logged that day.
+  List<MetricHistoryRow> _sorenessHistoryRows() {
+    final byDate = <String, List<MetricEntry>>{};
+    for (final e in _allMetrics) {
+      if (e.metricType.sorenessRegion != null) {
+        byDate.putIfAbsent(e.date, () => []).add(e);
+      }
+    }
+    return byDate.entries
+        .map((entry) => MetricHistoryRow(
+              date: entry.key,
+              tags: [
+                for (final e in entry.value)
+                  '${e.metricType.sorenessRegion!.label} (${e.value.round()})',
+              ],
+              onEdit: () => _editSorenessDay(entry.key),
+            ))
+        .toList();
   }
 
   Future<void> _editSimpleMetric(
@@ -143,48 +251,101 @@ class _MetricsScreenState extends State<MetricsScreen>
     );
   }
 
-  List<ChartPoint> _points(MetricType type, DateTime cutoff) {
-    final entries = _entries[type] ?? [];
-    return entries
-        .where((e) => DateTime.parse(e.date).isAfter(cutoff))
-        .map((e) => ChartPoint(DateTime.parse(e.date), e.value))
-        .toList();
+  Future<void> _openProgressPhotos() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const ProgressPhotoAlbumScreen()),
+    );
+    await _load();
   }
 
-  /// One point per date with any timed lift session — derived from
-  /// `lift_sessions.started_at`/`completed_at`, not a manually-logged
-  /// metric, so it's not in `_entries` alongside steps/sleep.
-  List<ChartPoint> _workoutDurationPoints(DateTime cutoff) {
-    return _workoutDurationByDate.entries
-        .where((e) => DateTime.parse(e.key).isAfter(cutoff))
-        .map((e) => ChartPoint(DateTime.parse(e.key), e.value))
-        .toList()
-      ..sort((a, b) => a.date.compareTo(b.date));
+  Future<void> _addProgressPhoto() async {
+    await showAddProgressPhotoSheet(context);
+    await _load();
   }
 
-  /// One dot per week (average of that week's entries) so no single raw
-  /// bodyweight reading is ever directly exposed — see designFiles/00_UX_DESIGN.md.
-  List<ChartPoint> _weeklyBodyweightPoints(DateTime cutoff) {
-    final byWeek = <DateTime, List<double>>{};
-    for (final e in _bodyweight) {
-      final date = DateTime.parse(e.date);
-      if (!date.isAfter(cutoff)) continue;
-      final weekStart = date.subtract(Duration(days: date.weekday - 1));
-      final key = DateTime(weekStart.year, weekStart.month, weekStart.day);
-      byWeek.putIfAbsent(key, () => []).add(e.weight);
-    }
-    final points =
-        byWeek.entries
-            .map(
-              (e) => ChartPoint(
-                e.key,
-                e.value.reduce((a, b) => a + b) / e.value.length,
-              ),
-            )
-            .toList()
-          ..sort((a, b) => a.date.compareTo(b.date));
-    return points;
+  Future<void> _openCustomMetricBuilder() async {
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => const CustomMetricBuilderSheet(),
+    );
   }
+
+  Future<void> _logCustomMetric(CustomMetric metric) async {
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => CustomMetricEntrySheet(metric: metric),
+    );
+  }
+
+  Future<void> _viewCustomMetricHistory(CustomMetric metric) async {
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => CustomMetricHistorySheet(metric: metric),
+    );
+  }
+
+  /// Days-tab pencil for a custom metric row — same entry sheet as logging
+  /// a new value, just pre-filled and replacing the specific entry tapped.
+  Future<void> _editCustomMetricEntry(CustomMetric metric, CustomMetricEntry entry) async {
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => CustomMetricEntrySheet(metric: metric, editingEntry: entry),
+    );
+  }
+
+  Future<void> _deleteCustomMetric(CustomMetric metric) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surfaceRaised,
+        title: Text('Delete "${metric.name}"?', style: AppText.subHeader),
+        content: Text(
+          'This deletes every value logged for this metric too. This cannot be undone.',
+          style: AppText.bodyText,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel', style: AppText.bodyText),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete', style: TextStyle(color: AppColors.accent)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    await AppServices.customMetrics.deleteDefinition(metric.id!);
+    AppServices.signalReload();
+    await _load();
+  }
+
+  List<ChartPoint> _customMetricPoints(CustomMetric metric, DateTime cutoff) =>
+      MetricChartPoints.customMetric(_customMetricEntries[metric.id] ?? [], cutoff);
+
+  String Function(double)? _customMetricYFormatter(CustomMetric metric) =>
+      MetricChartPoints.customYFormatter(metric);
+
+  List<ChartPoint> _points(MetricType type, DateTime cutoff) =>
+      MetricChartPoints.forEntries(_entries[type] ?? [], cutoff);
+
+  /// Derived from `lift_sessions.started_at`/`completed_at`, not a
+  /// manually-logged metric, so it's not in `_entries` alongside steps/sleep.
+  List<ChartPoint> _workoutDurationPoints(DateTime cutoff) =>
+      MetricChartPoints.workoutDuration(_workoutDurationByDate, cutoff);
+
+  List<ChartPoint> _weeklyBodyweightPoints(DateTime cutoff) =>
+      MetricChartPoints.weeklyBodyweight(_bodyweight, cutoff);
 
   @override
   Widget build(BuildContext context) {
@@ -201,6 +362,13 @@ class _MetricsScreenState extends State<MetricsScreen>
       backgroundColor: AppColors.background,
       appBar: AppBar(
         title: const Text('Metrics'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.add),
+            tooltip: 'New metric',
+            onPressed: _openCustomMetricBuilder,
+          ),
+        ],
         bottom: TabBar(
           controller: _tabController,
           indicatorColor: AppColors.accent,
@@ -228,19 +396,29 @@ class _MetricsScreenState extends State<MetricsScreen>
           _points(MetricType.steps, cutoff),
           showPrediction: true,
           trendWindowDays: 21,
+          onAdd: () => _logSimpleMetric(SimpleMetricKind.steps),
+          onHistory: () => _showMetricHistory('Steps', _stepsHistoryRows()),
         ),
         const SizedBox(height: AppSpacing.cardGap),
         _metricCard(
           'Sleep (hrs)',
           _points(MetricType.sleepHours, cutoff),
           trendWindowDays: 30,
+          onAdd: () => _logSimpleMetric(SimpleMetricKind.sleep),
+          onHistory: () => _showMetricHistory('Sleep', _sleepHistoryRows()),
         ),
         const SizedBox(height: AppSpacing.cardGap),
+        // No "+" here — Workout Duration is derived (planned sessions /
+        // lift Track Time), never manually logged, so there's nothing to
+        // add. Notebook still applies — it just shows the computed number
+        // per date, with no edit hook on any row.
         _metricCard(
           'Workout Duration (min)',
           _workoutDurationPoints(cutoff),
           trendWindowDays: 30,
           yFormatter: (v) => '${v.round()}m',
+          onHistory: () =>
+              _showMetricHistory('Workout Duration', _workoutDurationHistoryRows()),
         ),
         const SizedBox(height: AppSpacing.cardGap),
         AppCard(
@@ -248,7 +426,17 @@ class _MetricsScreenState extends State<MetricsScreen>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Soreness', style: AppText.bodyText),
+              Row(
+                children: [
+                  Text('Soreness', style: AppText.bodyText),
+                  const Spacer(),
+                  GestureDetector(
+                    onTap: () => _showMetricHistory('Soreness', _sorenessHistoryRows()),
+                    child: const Icon(Icons.menu_book_outlined,
+                        size: 20, color: AppColors.textSecondary),
+                  ),
+                ],
+              ),
               const SizedBox(height: AppSpacing.small),
               SizedBox(
                 height: 140,
@@ -315,6 +503,8 @@ class _MetricsScreenState extends State<MetricsScreen>
           showPrediction: true,
           trendWindowDays: 42,
           yFormatter: (v) => Units.formatMaskable(v),
+          onAdd: () => _logSimpleMetric(SimpleMetricKind.bodyweight),
+          onHistory: () => _showMetricHistory('Weight', _weightHistoryRows()),
         ),
         const SizedBox(height: AppSpacing.cardGap),
         // Cycle card: deliberately nondescript, no preview chart, per
@@ -342,23 +532,111 @@ class _MetricsScreenState extends State<MetricsScreen>
             ],
           ),
         ),
+        const SizedBox(height: AppSpacing.cardGap),
+        AppCard(
+          onTap: _openProgressPhotos,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Text('Progress Photos', style: AppText.bodyText),
+                  const Spacer(),
+                  GestureDetector(
+                    onTap: _addProgressPhoto,
+                    child: const Icon(Icons.camera_alt_outlined,
+                        size: 20, color: AppColors.textSecondary),
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppSpacing.small),
+              ProgressPhotoTimeline(photos: _progressPhotos),
+            ],
+          ),
+        ),
+        for (final metric in _customMetrics) ...[
+          const SizedBox(height: AppSpacing.cardGap),
+          AppCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(metric.name, style: AppText.bodyText),
+                    const Spacer(),
+                    GestureDetector(
+                      onTap: () => _viewCustomMetricHistory(metric),
+                      child: const Icon(Icons.menu_book_outlined,
+                          size: 20, color: AppColors.textSecondary),
+                    ),
+                    const SizedBox(width: AppSpacing.standard),
+                    GestureDetector(
+                      onTap: () => _logCustomMetric(metric),
+                      child: const Icon(Icons.add_circle_outline,
+                          size: 20, color: AppColors.textSecondary),
+                    ),
+                    const SizedBox(width: AppSpacing.standard),
+                    GestureDetector(
+                      onTap: () => _deleteCustomMetric(metric),
+                      child: const Icon(Icons.delete_outline,
+                          size: 20, color: AppColors.textSecondary),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.small),
+                LabeledTrendChart(
+                  points: _customMetricPoints(metric, cutoff),
+                  yLabelFormatter: _customMetricYFormatter(metric),
+                  height: 130,
+                ),
+              ],
+            ),
+          ),
+        ],
         const SizedBox(height: AppSpacing.xLarge),
       ],
     );
   }
 
+  /// [onAdd]/[onHistory] add the same notebook/"+" icon pair the custom
+  /// metric cards have — `null` skips a given icon (e.g. Workout Duration
+  /// has no add form at all, it's derived, not logged). No trash icon here
+  /// ever: unlike a custom metric, these built-in metric *types* can't be
+  /// deleted, only individual entries can (via [_showMetricHistory]'s
+  /// per-row edit hook).
   Widget _metricCard(
     String title,
     List<ChartPoint> points, {
     bool showPrediction = false,
     double trendWindowDays = 21,
     String Function(double)? yFormatter,
+    VoidCallback? onAdd,
+    VoidCallback? onHistory,
   }) {
     return AppCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: AppText.bodyText),
+          Row(
+            children: [
+              Text(title, style: AppText.bodyText),
+              if (onHistory != null || onAdd != null) const Spacer(),
+              if (onHistory != null)
+                GestureDetector(
+                  onTap: onHistory,
+                  child: const Icon(Icons.menu_book_outlined,
+                      size: 20, color: AppColors.textSecondary),
+                ),
+              if (onHistory != null && onAdd != null)
+                const SizedBox(width: AppSpacing.standard),
+              if (onAdd != null)
+                GestureDetector(
+                  onTap: onAdd,
+                  child: const Icon(Icons.add_circle_outline,
+                      size: 20, color: AppColors.textSecondary),
+                ),
+            ],
+          ),
           const SizedBox(height: AppSpacing.small),
           LabeledTrendChart(
             points: points,
@@ -434,6 +712,22 @@ class _MetricsScreenState extends State<MetricsScreen>
           label: 'Sleep',
           valueText: '${e.value.toStringAsFixed(1)} hrs',
           onEdit: () => _editSimpleMetric(SimpleMetricKind.sleep, e),
+        ));
+      }
+    }
+
+    // Custom metric entries, one row per entry (not collapsed per day like
+    // soreness — there's no shared multi-region sheet to reopen here, each
+    // entry is its own independent thing to edit).
+    for (final metric in _customMetrics) {
+      for (final e in _customMetricEntries[metric.id] ?? const <CustomMetricEntry>[]) {
+        rows.add(_DayRow(
+          date: e.date,
+          sortKey: e.loggedAt,
+          icon: Icons.insights,
+          label: metric.name,
+          valueText: metric.formatValue(e.value),
+          onEdit: () => _editCustomMetricEntry(metric, e),
         ));
       }
     }

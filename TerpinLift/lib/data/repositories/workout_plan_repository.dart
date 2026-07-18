@@ -40,12 +40,23 @@ class WorkoutPlanRepository {
     return WorkoutTemplateDay.fromMap(rows.first);
   }
 
-  /// Most recent `planned_sessions` row for each day (any status) — the
-  /// recency cue on Day Select. One query, grouped client-side since sqflite
-  /// doesn't do "latest per group" cleanly without a subquery.
+  /// Most recent **completed** `planned_sessions` row for each day — the
+  /// recency cue on Day Select. Deliberately excludes `active`/`aborted`
+  /// rows, not just `aborted` — `DaySelectScreen._selectDay` creates an
+  /// `active` row the instant a day is tapped, before any workout actually
+  /// happens, so a day merely glanced at and then backed out of (phone back
+  /// button, not the explicit Abort button) used to read as "done today"
+  /// even though nothing was logged. This should reflect "if/when the plan
+  /// was actually run," the same completion-based standard the Workouts
+  /// tab already uses. One query, grouped client-side since sqflite doesn't
+  /// do "latest per group" cleanly without a subquery.
   Future<Map<int, PlannedSession>> latestSessionPerDay() async {
-    final rows =
-        await (await _db.database).query('planned_sessions', orderBy: 'started_at DESC');
+    final rows = await (await _db.database).query(
+      'planned_sessions',
+      where: 'status = ?',
+      whereArgs: [PlannedSessionStatus.completed.key],
+      orderBy: 'started_at DESC',
+    );
     final sessions = rows.map(PlannedSession.fromMap).toList();
     final result = <int, PlannedSession>{};
     for (final s in sessions) {
@@ -73,6 +84,14 @@ class WorkoutPlanRepository {
   Future<void> deleteSession(int id) async =>
       (await _db.database).delete('planned_sessions', where: 'id = ?', whereArgs: [id]);
 
+  /// Wipes every `planned_sessions` row — used only by `TestDataService`
+  /// when reloading demo data, so old synthetic sessions don't linger
+  /// alongside the fresh batch (`wipeEverythingAndReseed` doesn't touch this
+  /// table, since a real user's Workout Planner history shouldn't be
+  /// silently cleared by loading test data).
+  Future<void> deleteAllSessions() async =>
+      (await _db.database).delete('planned_sessions');
+
   Future<PlannedSession?> getActiveSession() async {
     final rows = await (await _db.database).query(
       'planned_sessions',
@@ -83,6 +102,13 @@ class WorkoutPlanRepository {
     if (rows.isEmpty) return null;
     return PlannedSession.fromMap(rows.first);
   }
+
+  /// Low-level insert of a fully-formed [PlannedSession] (any status, any
+  /// timestamps) — unlike [startSession], which always stamps "now." Used
+  /// by `TestDataService` to backdate synthetic completed sessions across
+  /// the demo window; not meant for the real app flow.
+  Future<int> insertSession(PlannedSession session) async =>
+      (await _db.database).insert('planned_sessions', session.toMap());
 
   Future<PlannedSession> startSession(int templateDayId) async {
     final now = DateTime.now();

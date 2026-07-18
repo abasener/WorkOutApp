@@ -116,6 +116,7 @@ class PlannedSession {
       };
 
   PlannedSession copyWith({
+    String? startedAt,
     String? completedAt,
     PlannedSessionStatus? status,
     String? notes,
@@ -124,7 +125,7 @@ class PlannedSession {
         id: id,
         templateDayId: templateDayId,
         date: date,
-        startedAt: startedAt,
+        startedAt: startedAt ?? this.startedAt,
         completedAt: completedAt ?? this.completedAt,
         status: status ?? this.status,
         notes: notes ?? this.notes,

@@ -23,6 +23,11 @@ class StrengthGoalGauge extends StatelessWidget {
   /// isn't a meaningful concept the same way).
   final double? predictedValue;
 
+  /// Rep count the [currentE1rm] max was achieved at, shown alongside it
+  /// ("True max: 100lb, 4 reps"). `null` skips the rep count (e.g. the
+  /// bodyweight-reps variant, where `currentE1rm` already *is* a rep count).
+  final int? currentReps;
+
   /// Defaults to unit-aware weight formatting; pass an override (e.g. a
   /// rep-count formatter) for bodyweight exercises where the gauge tracks
   /// reps instead of lb.
@@ -33,6 +38,7 @@ class StrengthGoalGauge extends StatelessWidget {
     required this.tierTargets,
     required this.currentE1rm,
     this.predictedValue,
+    this.currentReps,
     this.formatValue,
   });
 
@@ -110,7 +116,9 @@ class StrengthGoalGauge extends StatelessWidget {
             ),
             const SizedBox(height: AppSpacing.standard),
             Text(
-              'True max: ${format(currentE1rm)}',
+              currentReps != null
+                  ? 'True max: ${format(currentE1rm)}, $currentReps ${currentReps == 1 ? 'rep' : 'reps'}'
+                  : 'True max: ${format(currentE1rm)}',
               style: AppText.smallText,
             ),
             if (predictedValue != null) ...[

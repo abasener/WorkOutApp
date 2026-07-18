@@ -32,9 +32,9 @@ class LiftSession {
         'notes': notes,
       };
 
-  LiftSession copyWith({String? date, String? notes}) => LiftSession(
+  LiftSession copyWith({int? exerciseId, String? date, String? notes}) => LiftSession(
         id: id,
-        exerciseId: exerciseId,
+        exerciseId: exerciseId ?? this.exerciseId,
         date: date ?? this.date,
         startedAt: startedAt,
         completedAt: completedAt,

@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 
+import '../../data/models/custom_metric.dart';
 import '../../data/models/metric_entry.dart';
 import '../../data/repositories/lift_repository.dart';
 import '../../services/app_services.dart';
 import '../../services/cycle_analysis.dart';
+import '../../services/user_profile.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/app_card.dart';
 import '../../widgets/simple_bar_chart.dart';
@@ -66,8 +68,13 @@ class _CycleDetailScreenState extends State<CycleDetailScreen> {
   CycleStats _stats = const CycleStats(periodLengths: [], cycleLengths: []);
   DateTime _focusedMonth = DateTime(DateTime.now().year, DateTime.now().month);
 
-  CycleOverlay _overlay = CycleOverlay.none;
+  // `null` = no overlay, a `CycleOverlay` = one of the 5 built-ins, a
+  // `CustomMetric` = one of the user's own metrics (2026-07-17) — a mixed
+  // dropdown value, same pattern the Lifts filter sheet already uses for a
+  // `Set<Object>` mixing two enum types.
+  Object? _overlaySelection;
   Map<String, double> _overlayValues = {};
+  List<CustomMetric> _customMetrics = [];
 
   @override
   void initState() {
@@ -77,6 +84,13 @@ class _CycleDetailScreenState extends State<CycleDetailScreen> {
 
   Future<void> _load() async {
     final flowEntries = await AppServices.cycle.getFlowEntries();
+    // Custom-metric overlay is only offered for female users, per the
+    // user's own framing ("if they are female and have cycles it should be
+    // overlappable onto that") — every other overlay/the screen itself is
+    // unchanged either way.
+    final customMetrics = UserProfile.gender == Gender.female
+        ? await AppServices.customMetrics.getAllDefinitions()
+        : <CustomMetric>[];
     if (!mounted) return;
     setState(() {
       _flowByDate = {
@@ -84,6 +98,7 @@ class _CycleDetailScreenState extends State<CycleDetailScreen> {
           if (e.flowValue != null) e.date: e.flowValue!,
       };
       _stats = CycleAnalysis.compute(flowEntries);
+      _customMetrics = customMetrics;
       _loading = false;
     });
     await _loadOverlay();
@@ -94,21 +109,47 @@ class _CycleDetailScreenState extends State<CycleDetailScreen> {
   bool _inFocusedMonth(DateTime d) =>
       d.year == _focusedMonth.year && d.month == _focusedMonth.month;
 
+  Color get _overlayColor {
+    final selection = _overlaySelection;
+    if (selection is CycleOverlay) return selection.color;
+    if (selection is CustomMetric) return const Color(0xFF9085E9); // reuse the PRs violet
+    return Colors.transparent;
+  }
+
   Future<void> _loadOverlay() async {
-    if (_overlay == CycleOverlay.none) {
+    final selection = _overlaySelection;
+    if (selection == null) {
       if (mounted) setState(() => _overlayValues = {});
       return;
     }
 
+    if (selection is CustomMetric) {
+      final entries = await AppServices.customMetrics.getEntries(selection.id!);
+      final inRange =
+          entries.where((e) => _inFocusedMonth(DateTime.parse(e.date))).toList();
+      final values = <String, double>{};
+      if (inRange.isNotEmpty) {
+        final minV = inRange.map((e) => e.value).reduce((a, b) => a < b ? a : b);
+        final maxV = inRange.map((e) => e.value).reduce((a, b) => a > b ? a : b);
+        final range = (maxV - minV).abs() < 1e-9 ? 1.0 : (maxV - minV);
+        for (final e in inRange) {
+          values[e.date] = ((e.value - minV) / range).clamp(0.0, 1.0);
+        }
+      }
+      if (mounted) setState(() => _overlayValues = values);
+      return;
+    }
+
+    final overlay = selection as CycleOverlay;
     final values = <String, double>{};
 
-    switch (_overlay) {
+    switch (overlay) {
       case CycleOverlay.none:
         break;
       case CycleOverlay.sleep:
       case CycleOverlay.steps:
         final type =
-            _overlay == CycleOverlay.sleep ? MetricType.sleepHours : MetricType.steps;
+            overlay == CycleOverlay.sleep ? MetricType.sleepHours : MetricType.steps;
         final entries = await AppServices.metrics.getByType(type);
         final inRange =
             entries.where((e) => _inFocusedMonth(DateTime.parse(e.date))).toList();
@@ -336,34 +377,54 @@ class _CycleDetailScreenState extends State<CycleDetailScreen> {
             ],
           ),
           const SizedBox(height: AppSpacing.standard),
-          DropdownButton<CycleOverlay>(
-            value: _overlay,
+          DropdownButton<Object?>(
+            value: _overlaySelection,
             isExpanded: true,
             dropdownColor: AppColors.surfaceRaised,
             underline: Container(height: 1, color: AppColors.border),
             style: AppText.bodyText,
-            items: CycleOverlay.values
-                .map((o) => DropdownMenuItem(
+            items: [
+              const DropdownMenuItem<Object?>(value: null, child: Text('Overlay: None')),
+              ...CycleOverlay.values.where((o) => o != CycleOverlay.none).map(
+                    (o) => DropdownMenuItem<Object?>(
                       value: o,
                       child: Row(
                         children: [
-                          if (o != CycleOverlay.none) ...[
-                            Container(
-                              width: 10,
-                              height: 10,
-                              decoration:
-                                  BoxDecoration(color: o.color, shape: BoxShape.circle),
-                            ),
-                            const SizedBox(width: AppSpacing.small),
-                          ],
+                          Container(
+                            width: 10,
+                            height: 10,
+                            decoration:
+                                BoxDecoration(color: o.color, shape: BoxShape.circle),
+                          ),
+                          const SizedBox(width: AppSpacing.small),
                           Text('Overlay: ${o.label}'),
                         ],
                       ),
-                    ))
-                .toList(),
+                    ),
+                  ),
+              // Custom-metric overlays — only populated for female users, see
+              // `_load`. Reuses the PRs violet rather than validating a new
+              // hue per metric, since only one overlay is ever shown at once.
+              ..._customMetrics.map(
+                (m) => DropdownMenuItem<Object?>(
+                  value: m,
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 10,
+                        height: 10,
+                        decoration: const BoxDecoration(
+                            color: Color(0xFF9085E9), shape: BoxShape.circle),
+                      ),
+                      const SizedBox(width: AppSpacing.small),
+                      Text('Overlay: ${m.name}'),
+                    ],
+                  ),
+                ),
+              ),
+            ],
             onChanged: (v) {
-              if (v == null) return;
-              setState(() => _overlay = v);
+              setState(() => _overlaySelection = v);
               _loadOverlay();
             },
           ),
@@ -412,7 +473,7 @@ class _CycleDetailScreenState extends State<CycleDetailScreen> {
                 margin: const EdgeInsets.all(1),
                 decoration: BoxDecoration(
                   color: overlayValue != null
-                      ? _overlay.color.withValues(alpha: 0.15 + overlayValue * 0.45)
+                      ? _overlayColor.withValues(alpha: 0.15 + overlayValue * 0.45)
                       : null,
                   borderRadius: BorderRadius.circular(6),
                 ),

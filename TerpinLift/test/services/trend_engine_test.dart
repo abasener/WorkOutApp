@@ -1,8 +1,24 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:terpinlift/data/models/lift_session.dart';
 import 'package:terpinlift/data/models/lift_set.dart';
+import 'package:terpinlift/data/models/workout_plan.dart';
 import 'package:terpinlift/data/repositories/lift_repository.dart';
 import 'package:terpinlift/services/trend_engine.dart';
+import 'package:terpinlift/services/user_profile.dart';
+
+PlannedSession _plannedSession(
+  String date, {
+  required String startedAt,
+  String? completedAt,
+  PlannedSessionStatus status = PlannedSessionStatus.completed,
+}) =>
+    PlannedSession(
+      templateDayId: 1,
+      date: date,
+      startedAt: startedAt,
+      completedAt: completedAt,
+      status: status,
+    );
 
 SessionWithSets _session(String date, List<LiftSet> sets) =>
     SessionWithSets(LiftSession(exerciseId: 1, date: date), sets);
@@ -27,80 +43,113 @@ LiftSet _set({required double weight, int reps = 5, double? rpe}) => LiftSet(
     );
 
 void main() {
-  group('TrendEngine.predictNextE1rm', () {
+  group('TrendEngine.predictedOneRepMax', () {
     test('returns null with no sessions', () {
-      expect(TrendEngine.predictNextE1rm([]), isNull);
+      expect(TrendEngine.predictedOneRepMax([]), isNull);
     });
 
     test('returns null when every session has zero sets', () {
       final sessions = [_session('2026-07-01', [])];
-      expect(TrendEngine.predictNextE1rm(sessions), isNull);
+      expect(TrendEngine.predictedOneRepMax(sessions), isNull);
     });
 
-    test('goal sits between last session and rolling average, within the fixed band', () {
+    test('a multi-rep set projects lower for female than male (flatter divisor)', () {
+      final sessions = [_session('2026-07-05', [_set(weight: 100, reps: 4)])];
+      final female = TrendEngine.predictedOneRepMax(sessions, gender: Gender.female);
+      final male = TrendEngine.predictedOneRepMax(sessions, gender: Gender.male);
+      expect(female, lessThan(male!));
+    });
+
+    test('a true 1-rep set is unaffected by gender — no rep-conversion to scale', () {
+      final sessions = [_session('2026-07-05', [_set(weight: 100, reps: 1)])];
+      final female = TrendEngine.predictedOneRepMax(sessions, gender: Gender.female);
+      final male = TrendEngine.predictedOneRepMax(sessions, gender: Gender.male);
+      expect(female, closeTo(male!, 0.001));
+    });
+
+    test('no time decay — an old single session is used at full value, not tapered', () {
+      final sessions = [_session('2020-01-01', [_set(weight: 200, reps: 1)])];
+      expect(TrendEngine.predictedOneRepMax(sessions), 200);
+    });
+
+    test('takes the best of the last 3 sessions, not just the single most recent', () {
       final sessions = [
-        _session('2026-07-05', [_set(weight: 205, rpe: 8)]),
-        _session('2026-07-03', [_set(weight: 200, rpe: 8)]),
-        _session('2026-07-01', [_set(weight: 195, rpe: 8)]),
+        _session('2026-07-05', [_set(weight: 100, reps: 1)]), // light/off day, most recent
+        _session('2026-07-03', [_set(weight: 205, reps: 1)]), // the real recent best
+        _session('2026-07-01', [_set(weight: 200, reps: 1)]),
       ];
-      final prediction = TrendEngine.predictNextE1rm(sessions);
-      expect(prediction, isNotNull);
-      final (low, goal, high) = prediction!;
-      expect(high - low, closeTo(100.0, 0.001)); // default +/-50lb band
-      // A clear upward trend (205 > prior average) earns the bigger +3%
-      // overload step, so the goal lands a bit above the raw e1RMs, not
-      // just an average of them.
-      expect(goal, greaterThan(230));
-      expect(goal, lessThan(260));
+      expect(TrendEngine.predictedOneRepMax(sessions), 205);
+    });
+  });
+
+  group('TrendEngine.predictNextAtCharacteristicReps', () {
+    test('returns null with no sessions', () {
+      expect(TrendEngine.predictNextAtCharacteristicReps([]), isNull);
     });
 
-    test('a slump (last session well below recent average) does not add an overload step', () {
-      final slumping = [
-        _session('2026-07-05', [_set(weight: 150, rpe: 7)]), // clear drop
-        _session('2026-07-03', [_set(weight: 200, rpe: 8)]),
-        _session('2026-07-01', [_set(weight: 200, rpe: 8)]),
-      ];
-      final climbing = [
-        _session('2026-07-05', [_set(weight: 210, rpe: 8)]), // clear rise
-        _session('2026-07-03', [_set(weight: 200, rpe: 8)]),
-        _session('2026-07-01', [_set(weight: 200, rpe: 8)]),
-      ];
-      final slumpGoal = TrendEngine.predictNextE1rm(slumping)!.$2;
-      final climbGoal = TrendEngine.predictNextE1rm(climbing)!.$2;
-      // The climbing case should apply a bigger overload step than the
-      // slumping case relative to each one's own blended e1RM — checked
-      // indirectly by confirming the slump doesn't chase a new high.
-      expect(slumpGoal, lessThan(200));
-      expect(climbGoal, greaterThan(200));
+    test('returns null when every session has zero sets', () {
+      final sessions = [_session('2026-07-01', [])];
+      expect(TrendEngine.predictNextAtCharacteristicReps(sessions), isNull);
     });
 
-    test('low-RPE (recovery) sessions lean on the rolling average, not the last session alone',
-        () {
+    test('a single data point: goal equals that weight, at the widest confidence band', () {
+      final sessions = [_session('2026-07-05', [_set(weight: 100, reps: 4)])];
+      final result = TrendEngine.predictNextAtCharacteristicReps(sessions)!;
+      expect(result.reps, 4);
+      expect(result.goal, 100);
+      expect(result.high - result.low, closeTo(80.0, 0.001)); // +/-40 ceiling at n=1
+      expect(result.sampleSize, 1);
+    });
+
+    test('projects the next weight as last + average recent delta at the same rep count', () {
       final sessions = [
-        _session('2026-07-05', [_set(weight: 100, rpe: 3)]), // light/recovery day
-        _session('2026-07-03', [_set(weight: 200, rpe: 8)]),
-        _session('2026-07-01', [_set(weight: 200, rpe: 8)]),
+        _session('2026-07-05', [_set(weight: 100, reps: 4)]),
+        _session('2026-07-03', [_set(weight: 95, reps: 4)]),
+        _session('2026-07-01', [_set(weight: 90, reps: 4)]),
       ];
-      final goal = TrendEngine.predictNextE1rm(sessions)!.$2;
-      // A 100lb recovery-day e1RM shouldn't drag the goal anywhere near 100
-      // once low RPE correctly discounts it in favor of the 200 average.
-      expect(goal, greaterThan(150));
+      final result = TrendEngine.predictNextAtCharacteristicReps(sessions)!;
+      expect(result.reps, 4);
+      expect(result.goal, closeTo(105.0, 0.001)); // 100 + avg(5, 5)
+      expect(result.sampleSize, 3);
     });
 
-    test('custom valueOf selector and band are honored (bodyweight-lift path)', () {
+    test('characteristic reps is the mode of each session\'s heaviest-set rep count, and only '
+        'matching sets feed the projection', () {
       final sessions = [
-        _session('2026-07-05', [_set(weight: 5, reps: 8, rpe: 8)]),
-        _session('2026-07-03', [_set(weight: 0, reps: 6, rpe: 8)]),
+        // Most recent session's heaviest set is 8 reps — doesn't match the
+        // mode (4), so it's skipped for the same-rep history entirely.
+        _session('2026-07-05', [_set(weight: 60, reps: 8)]),
+        _session('2026-07-03', [_set(weight: 100, reps: 4)]),
+        _session('2026-07-01', [_set(weight: 95, reps: 4)]),
+      ];
+      final result = TrendEngine.predictNextAtCharacteristicReps(sessions)!;
+      expect(result.reps, 4);
+      expect(result.goal, closeTo(105.0, 0.001)); // 100 (most recent 4-rep entry) + 5
+      expect(result.sampleSize, 2);
+    });
+
+    test('confidence band narrows as same-rep history accumulates', () {
+      final sparse = [_session('2026-07-05', [_set(weight: 100, reps: 4)])];
+      final rich = [
+        for (var i = 0; i < 16; i++)
+          _session('2026-0${1 + i ~/ 28}-${1 + i % 28}', [_set(weight: 100, reps: 4)]),
+      ];
+      final sparseBand = TrendEngine.predictNextAtCharacteristicReps(sparse)!;
+      final richBand = TrendEngine.predictNextAtCharacteristicReps(rich)!;
+      expect(sparseBand.high - sparseBand.low, greaterThan(richBand.high - richBand.low));
+      expect(richBand.high - richBand.low, closeTo(20.0, 0.001)); // 2 * (40/sqrt(16))
+    });
+
+    test('a bodyweight-adjusted loadOf selector is honored', () {
+      final sessions = [
+        _session('2026-07-05', [_set(weight: 5, reps: 8)]),
+        _session('2026-07-03', [_set(weight: 0, reps: 8)]),
       ];
       const bodyweightLb = 150.0;
-      double valueOf(SessionWithSets s) => s.bodyweightAdjustedBestE1rm(bodyweightLb);
-      final prediction = TrendEngine.predictNextE1rm(sessions, valueOf: valueOf, band: 10);
-      expect(prediction, isNotNull);
-      final (low, _, high) = prediction!;
-      expect(high - low, closeTo(20.0, 0.001));
-      // Should be in the neighborhood of bodyweight-plus-a-little, not the
-      // near-zero/negative range plain (unweighted) e1RM would produce.
-      expect(low, greaterThan(100));
+      double loadOf(LiftSet s) => bodyweightLb + s.weight;
+      final result = TrendEngine.predictNextAtCharacteristicReps(sessions, loadOf: loadOf)!;
+      expect(result.reps, 8);
+      expect(result.goal, greaterThan(100)); // in the bodyweight-plus-a-little range, not ~5
     });
   });
 
@@ -149,6 +198,68 @@ void main() {
         ),
       ];
       expect(TrendEngine.workoutDurationMinutesByDate(sessions), isEmpty);
+    });
+
+    test(
+        'a completed planned session overrides the lift-session sum for its date, '
+        'not adds to it', () {
+      final sessions = [
+        _timedSession(
+          '2026-07-10',
+          startedAt: '2026-07-10T18:00:00',
+          completedAt: '2026-07-10T18:15:00', // a quick data-entry window, not the real length
+        ),
+      ];
+      final plannedSessions = [
+        _plannedSession(
+          '2026-07-10',
+          startedAt: '2026-07-10T19:00:00',
+          completedAt: '2026-07-10T20:30:00', // the real 90-minute workout
+        ),
+      ];
+      final result = TrendEngine.workoutDurationMinutesByDate(
+        sessions,
+        plannedSessions: plannedSessions,
+      );
+      expect(result['2026-07-10'], 90);
+    });
+
+    test('an active (not yet completed) planned session is ignored', () {
+      final plannedSessions = [
+        _plannedSession(
+          '2026-07-10',
+          startedAt: '2026-07-10T19:00:00',
+          status: PlannedSessionStatus.active,
+        ),
+      ];
+      final result = TrendEngine.workoutDurationMinutesByDate(
+        [],
+        plannedSessions: plannedSessions,
+      );
+      expect(result, isEmpty);
+    });
+
+    test('a date with no planned session still falls back to the lift-session sum', () {
+      final sessions = [
+        _timedSession(
+          '2026-07-11',
+          startedAt: '2026-07-11T10:00:00',
+          completedAt: '2026-07-11T10:20:00',
+        ),
+      ];
+      final plannedSessions = [
+        _plannedSession(
+          '2026-07-10',
+          startedAt: '2026-07-10T19:00:00',
+          completedAt: '2026-07-10T20:30:00',
+        ),
+      ];
+      final result = TrendEngine.workoutDurationMinutesByDate(
+        sessions,
+        plannedSessions: plannedSessions,
+      );
+      expect(result['2026-07-11'], 20);
+      expect(result['2026-07-10'], 90);
     });
   });
 }

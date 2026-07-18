@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart' hide TextDirection;
 
 import '../../data/models/exercise.dart';
 import '../../data/models/workout_plan.dart';
@@ -16,6 +17,20 @@ import 'pattern_pool_screen.dart';
 /// already been done for each (derived live, see `WorkoutPlanService`), an
 /// optional elapsed timer, a soft progress bar, notes, and Abort/Complete.
 /// See designFiles/10_WORKOUT_PLANNER.md.
+///
+/// **Viewing a completed session also exposes editable start/end times**
+/// (2026-07-17) — added after a real workout's recorded duration read far
+/// shorter than it actually was. Root cause: the Metrics "Workout Duration"
+/// chart used to be built entirely from individual lift-log Track Time
+/// windows, which measure how long *that logging form* stayed open, not the
+/// real workout length. This screen's own start/complete timestamps
+/// (`PlannedSession.startedAt`/`completedAt` — already set correctly by
+/// `startSession`/`completeSession`, no lifecycle bug there) are the
+/// authoritative whole-workout duration when one exists, and now override
+/// the lift-session sum for that date (`TrendEngine.
+/// workoutDurationMinutesByDate`) instead of being ignored by it. These
+/// fields were already right in most cases; this UI just lets a wrong one
+/// get fixed after the fact.
 class ActiveDayScreen extends StatefulWidget {
   final PlannedSession session;
   final WorkoutTemplateDay day;
@@ -34,6 +49,17 @@ class _ActiveDayScreenState extends State<ActiveDayScreen> {
   late final _notesController = TextEditingController(text: widget.session.notes ?? '');
   Timer? _ticker;
   Duration _elapsed = Duration.zero;
+
+  // Editable start/complete times for a **completed** session — added after
+  // the user found a workout's recorded duration read far shorter than it
+  // actually was (a lift session's own timer measures how long its log form
+  // stayed open, not the real workout length — see `TrendEngine.
+  // workoutDurationMinutesByDate`). Only meaningful once `completedAt`
+  // exists; kept as plain `DateTime` (not ISO strings) so `showTimePicker`
+  // has something to seed from directly.
+  late DateTime _editedStart = DateTime.parse(widget.session.startedAt);
+  late DateTime? _editedEnd =
+      widget.session.completedAt == null ? null : DateTime.parse(widget.session.completedAt!);
 
   bool get _isActive => _session.status == PlannedSessionStatus.active;
 
@@ -74,6 +100,37 @@ class _ActiveDayScreenState extends State<ActiveDayScreen> {
     final updated = _session.copyWith(notes: text);
     await AppServices.workoutPlans.updateSession(updated);
     setState(() => _session = updated);
+  }
+
+  Future<void> _pickStart() async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(_editedStart),
+    );
+    if (picked == null) return;
+    setState(() => _editedStart = DateTime(
+          _editedStart.year,
+          _editedStart.month,
+          _editedStart.day,
+          picked.hour,
+          picked.minute,
+        ));
+  }
+
+  Future<void> _pickEnd() async {
+    final base = _editedEnd ?? _editedStart;
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(base),
+    );
+    if (picked == null) return;
+    setState(() => _editedEnd = DateTime(
+          base.year,
+          base.month,
+          base.day,
+          picked.hour,
+          picked.minute,
+        ));
   }
 
   Future<void> _openSlot(MovementPattern pattern) async {
@@ -119,7 +176,15 @@ class _ActiveDayScreenState extends State<ActiveDayScreen> {
   }
 
   Future<void> _saveChanges() async {
-    await _saveNotes(_notesController.text);
+    // Times only make sense to edit once the workout's actually complete —
+    // an active session's start time is still live-tracked, and it has no
+    // end yet.
+    final updated = _session.copyWith(
+      notes: _notesController.text,
+      startedAt: _isActive ? null : _editedStart.toIso8601String(),
+      completedAt: _isActive || _editedEnd == null ? null : _editedEnd!.toIso8601String(),
+    );
+    await AppServices.workoutPlans.updateSession(updated);
     AppServices.signalReload();
     if (mounted) Navigator.pop(context);
   }
@@ -157,6 +222,21 @@ class _ActiveDayScreenState extends State<ActiveDayScreen> {
     final h = _elapsed.inHours;
     final m = _elapsed.inMinutes % 60;
     return h > 0 ? '${h}h ${m}m' : '${m}m';
+  }
+
+  String _formatTime(DateTime t) => DateFormat('h:mm a').format(t);
+
+  /// Live-recomputed as the user adjusts the start/end pickers, so editing
+  /// makes it immediately obvious "which side it cut short" — the whole
+  /// point of exposing this at all.
+  String get _editedDurationLabel {
+    final end = _editedEnd;
+    if (end == null) return '';
+    final minutes = end.difference(_editedStart).inMinutes;
+    if (minutes <= 0) return 'Duration: —';
+    final h = minutes ~/ 60;
+    final m = minutes % 60;
+    return h > 0 ? 'Duration: ${h}h ${m}m' : 'Duration: ${m}m';
   }
 
   @override
@@ -211,6 +291,52 @@ class _ActiveDayScreenState extends State<ActiveDayScreen> {
                   onTapOutside: (_) => _saveNotes(_notesController.text),
                   onSubmitted: _saveNotes,
                 ),
+                if (!_isActive && _session.status == PlannedSessionStatus.completed) ...[
+                  const SizedBox(height: AppSpacing.large),
+                  Row(
+                    children: [
+                      Text('Start / End Time', style: AppText.label),
+                      const Spacer(),
+                      if (_editedEnd != null)
+                        Text(_editedDurationLabel, style: AppText.smallText),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.small),
+                  Text(
+                    'Fix these if a workout logged short — a lift log form '
+                    'only tracks how long it was open, not the real workout '
+                    'length.',
+                    style: AppText.smallText,
+                  ),
+                  const SizedBox(height: AppSpacing.standard),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(color: AppColors.border),
+                            foregroundColor: AppColors.textPrimary,
+                          ),
+                          onPressed: _pickStart,
+                          child: Text('Start: ${_formatTime(_editedStart)}'),
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.standard),
+                      Expanded(
+                        child: OutlinedButton(
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(color: AppColors.border),
+                            foregroundColor: AppColors.textPrimary,
+                          ),
+                          onPressed: _pickEnd,
+                          child: Text(_editedEnd == null
+                              ? 'End: —'
+                              : 'End: ${_formatTime(_editedEnd!)}'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
                 const SizedBox(height: AppSpacing.large),
                 SizedBox(
                   width: double.infinity,

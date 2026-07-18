@@ -3,7 +3,7 @@ import 'package:sqflite/sqflite.dart';
 import 'profile_manager.dart';
 
 class DatabaseHelper {
-  static const _kDbVersion = 11;
+  static const _kDbVersion = 17;
 
   /// Which data set this instance reads/writes — see `ProfileManager`.
   /// `AppServices.switchProfile` swaps in a new `DatabaseHelper` rather than
@@ -569,7 +569,11 @@ class DatabaseHelper {
         is_seeded         INTEGER NOT NULL DEFAULT 0,
         youtube_url       TEXT,
         created           TEXT    NOT NULL,
-        pinned            INTEGER NOT NULL DEFAULT 0
+        pinned            INTEGER NOT NULL DEFAULT 0,
+        goal_source       TEXT,
+        progress_metric   TEXT,
+        notes             TEXT,
+        target_muscles    TEXT
       )
     ''');
 
@@ -675,6 +679,90 @@ class DatabaseHelper {
         status         TEXT    NOT NULL,
         notes          TEXT,
         FOREIGN KEY (template_day_id) REFERENCES workout_template_days (id) ON DELETE CASCADE
+      )
+    ''');
+
+    // User-set goals, a log per exercise (not one-per-exercise — the user
+    // can keep multiple over time, like a lift log entry, each with its own
+    // optional label so old goals stay visible/nameable rather than getting
+    // overwritten) — the fallback/override for exercises with no published
+    // strength standard (most machines/isolation work), and an opt-in
+    // override even for exercises that *do* have one (Goal gauge,
+    // designFiles/07_SMART_TRENDS.md). The most recent entry (by `created`)
+    // is the one that actually drives the gauge; older ones are just
+    // history. Exactly one of target_weight/target_reps is set per row,
+    // matching whichever axis that exercise's Goal gauge already uses
+    // (weight for normal lifts, reps for bodyweight ones) — enforced in
+    // code, not a CHECK constraint, same style as the rest of this schema.
+    await db.execute('''
+      CREATE TABLE custom_goals (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        exercise_id   INTEGER NOT NULL,
+        label         TEXT,
+        target_weight REAL,
+        target_reps   INTEGER,
+        created       TEXT    NOT NULL,
+        FOREIGN KEY (exercise_id) REFERENCES exercises (id) ON DELETE CASCADE
+      )
+    ''');
+
+    // Progress photos — a simple date-stamped log of image file paths (the
+    // files themselves live in app storage, see `ProgressPhotoRepository`);
+    // multiple per day is expected (different angles/poses), so no
+    // uniqueness constraint on date.
+    await db.execute('''
+      CREATE TABLE progress_photos (
+        id        INTEGER PRIMARY KEY AUTOINCREMENT,
+        date      TEXT    NOT NULL,
+        file_path TEXT    NOT NULL,
+        taken_at  TEXT    NOT NULL
+      )
+    ''');
+
+    // User-defined metrics (the "metric builder") — unlimited, each with a
+    // `kind` deciding how its entries are captured/displayed:
+    // - number: a plain value (e.g. temperature), `scale_max`/`scale_icon`/
+    //   `class_labels` all null.
+    // - scale: a 0-`scale_max` level (same shape as muscle soreness),
+    //   `scale_icon` picks which icon set renders it (flame/star/dot).
+    // - classes: a named-category value — `class_labels` is a comma-joined
+    //   ordered list, and entries store the chosen label's index into it.
+    await db.execute('''
+      CREATE TABLE custom_metrics (
+        id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+        name                 TEXT    NOT NULL,
+        kind                 TEXT    NOT NULL,
+        scale_max            INTEGER,
+        scale_icon           TEXT,
+        class_labels         TEXT,
+        created              TEXT    NOT NULL,
+        allow_multiple_per_day INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE custom_metric_entries (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        custom_metric_id  INTEGER NOT NULL,
+        date              TEXT    NOT NULL,
+        value             REAL    NOT NULL,
+        logged_at         TEXT    NOT NULL,
+        FOREIGN KEY (custom_metric_id) REFERENCES custom_metrics (id) ON DELETE CASCADE
+      )
+    ''');
+
+    // Home's Checklist widget — a fixed, user-edited list of recurring
+    // reminders ("bring water bottle," "log sleep") rather than a one-off
+    // task list; `last_checked_date` is the whole daily-reset mechanism —
+    // a row reads as "checked" only if that date is today, so there's no
+    // background job needed to clear checkmarks overnight, it just falls
+    // out of the comparison at render time.
+    await db.execute('''
+      CREATE TABLE todo_items (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        text              TEXT    NOT NULL,
+        time_of_day       TEXT,
+        sort_order        INTEGER NOT NULL,
+        last_checked_date TEXT
       )
     ''');
 
@@ -906,6 +994,103 @@ class DatabaseHelper {
             'pinned': 0,
           });
         }
+      case 12:
+        // Custom per-exercise goals + a per-exercise Goal-source/progress-
+        // metric preference (designFiles/07_SMART_TRENDS.md "Custom goals
+        // and per-lift metric preference") — lets a lift use the user's own
+        // target instead of (or in addition to) a published strength
+        // standard, and lets True Max vs. Predicted 1RM be picked per lift
+        // rather than one global rule.
+        await db.execute('ALTER TABLE exercises ADD COLUMN goal_source TEXT');
+        await db.execute('ALTER TABLE exercises ADD COLUMN progress_metric TEXT');
+        await db.execute('''
+          CREATE TABLE custom_goals (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            exercise_id   INTEGER NOT NULL UNIQUE,
+            target_weight REAL,
+            target_reps   INTEGER,
+            created       TEXT    NOT NULL,
+            FOREIGN KEY (exercise_id) REFERENCES exercises (id) ON DELETE CASCADE
+          )
+        ''');
+      case 13:
+        // Custom goals become a log (multiple entries per exercise, each
+        // optionally labeled) instead of one-per-exercise — the v12 table
+        // shipped without any real usage yet (feature was brand new), so
+        // this just drops and recreates rather than migrating rows.
+        await db.execute('DROP TABLE custom_goals');
+        await db.execute('''
+          CREATE TABLE custom_goals (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            exercise_id   INTEGER NOT NULL,
+            label         TEXT,
+            target_weight REAL,
+            target_reps   INTEGER,
+            created       TEXT    NOT NULL,
+            FOREIGN KEY (exercise_id) REFERENCES exercises (id) ON DELETE CASCADE
+          )
+        ''');
+      case 14:
+        // Curated per-lift "Overview" cues (MuscleMap.liftOverview) are
+        // replaced by free-text personal notes the user writes themselves
+        // (designFiles/03_SCREEN_lifts.md) — and new custom exercises can
+        // now record their own fine-grained target muscles instead of only
+        // falling back to a broad category-based guess.
+        await db.execute('ALTER TABLE exercises ADD COLUMN notes TEXT');
+        await db.execute('ALTER TABLE exercises ADD COLUMN target_muscles TEXT');
+      case 15:
+        // Progress photos (a date-stamped image log) and the metric builder
+        // (unlimited user-defined metrics — number/scale/classes kinds) —
+        // see designFiles/05_SCREEN_metrics.md.
+        await db.execute('''
+          CREATE TABLE progress_photos (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            date      TEXT    NOT NULL,
+            file_path TEXT    NOT NULL,
+            taken_at  TEXT    NOT NULL
+          )
+        ''');
+        await db.execute('''
+          CREATE TABLE custom_metrics (
+            id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+            name                   TEXT    NOT NULL,
+            kind                   TEXT    NOT NULL,
+            scale_max              INTEGER,
+            scale_icon             TEXT,
+            class_labels           TEXT,
+            created                TEXT    NOT NULL,
+            allow_multiple_per_day INTEGER NOT NULL DEFAULT 0
+          )
+        ''');
+        await db.execute('''
+          CREATE TABLE custom_metric_entries (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            custom_metric_id  INTEGER NOT NULL,
+            date              TEXT    NOT NULL,
+            value             REAL    NOT NULL,
+            logged_at         TEXT    NOT NULL,
+            FOREIGN KEY (custom_metric_id) REFERENCES custom_metrics (id) ON DELETE CASCADE
+          )
+        ''');
+      case 16:
+        // `allow_multiple_per_day` — a metric built while still on v15
+        // (this same round) predates the column the CREATE TABLE above now
+        // includes for anyone migrating straight from v14.
+        await db.execute(
+          'ALTER TABLE custom_metrics ADD COLUMN allow_multiple_per_day '
+          'INTEGER NOT NULL DEFAULT 0',
+        );
+      case 17:
+        // Home's Checklist widget — see designFiles/02_SCREEN_home.md.
+        await db.execute('''
+          CREATE TABLE todo_items (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            text              TEXT    NOT NULL,
+            time_of_day       TEXT,
+            sort_order        INTEGER NOT NULL,
+            last_checked_date TEXT
+          )
+        ''');
     }
   }
 

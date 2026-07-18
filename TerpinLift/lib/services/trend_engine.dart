@@ -1,5 +1,9 @@
+import 'dart:math' as math;
+
 import '../data/models/lift_set.dart';
+import '../data/models/workout_plan.dart';
 import '../data/repositories/lift_repository.dart';
+import 'user_profile.dart';
 
 enum LiftIntensity { allOut, normal, recovery }
 
@@ -39,13 +43,24 @@ class TrendEngine {
   }
 
   /// Total logged lift time per date, in minutes — the Metrics "Workout
-  /// Duration" trend chart. Only counts sessions with both `started_at` and
-  /// `completed_at` set (i.e. "Track time" was on when logging, `04_SCREEN_
-  /// quick_log.md`); sessions without a timer just don't contribute, they're
-  /// not treated as 0 minutes. Sums every session on a date rather than
-  /// taking one, since a single day can have more than one logged session
-  /// (multiple exercises, or more than one workout).
-  static Map<String, double> workoutDurationMinutesByDate(List<SessionWithSets> sessions) {
+  /// Duration" trend chart. Base case: sums every lift session on a date
+  /// with both `started_at` and `completed_at` set (i.e. "Track time" was on
+  /// when logging, `04_SCREEN_quick_log.md`); sessions without a timer just
+  /// don't contribute, they're not treated as 0 minutes.
+  ///
+  /// **`plannedSessions` overrides this per date when a completed Workout
+  /// Planner session exists for it** — a real bug found on-device: summing
+  /// individual lift-log windows actually measures "how long each entry
+  /// form happened to stay open," which can read far short of the true
+  /// workout length (e.g. sets logged in a quick burst after the fact). A
+  /// completed `PlannedSession`'s own start-to-complete span is the entire
+  /// workout's actual wall-clock duration, so it replaces (not adds to) the
+  /// lift-session sum for any date it covers — the two would otherwise
+  /// double-count the same workout.
+  static Map<String, double> workoutDurationMinutesByDate(
+    List<SessionWithSets> sessions, {
+    List<PlannedSession> plannedSessions = const [],
+  }) {
     final result = <String, double>{};
     for (final s in sessions) {
       final startedAt = s.session.startedAt;
@@ -56,6 +71,16 @@ class TrendEngine {
       if (minutes <= 0) continue; // clock skew/bad data guard, not a real duration
       result[s.session.date] = (result[s.session.date] ?? 0) + minutes;
     }
+
+    final plannedByDate = <String, double>{};
+    for (final p in plannedSessions) {
+      if (p.status != PlannedSessionStatus.completed || p.completedAt == null) continue;
+      final minutes =
+          DateTime.parse(p.completedAt!).difference(DateTime.parse(p.startedAt)).inSeconds / 60;
+      if (minutes <= 0) continue;
+      plannedByDate[p.date] = (plannedByDate[p.date] ?? 0) + minutes;
+    }
+    result.addAll(plannedByDate);
     return result;
   }
 
@@ -69,71 +94,156 @@ class TrendEngine {
     return LiftIntensity.normal;
   }
 
-  /// Predicted next e1RM as (low, goal, high), where low/high are a fixed
-  /// +/-50lb band around the goal per the user's request — a placeholder
-  /// band width until a real error-region model (recovery-aware, growing
-  /// with distance from known data) replaces it later.
-  ///
-  /// This is a "try for this next" progressive-overload target, NOT a
-  /// same-day prediction — it deliberately does not factor in today's
-  /// soreness/sleep/recency (that's `ReadinessEngine`'s job, kept separate:
-  /// this answers "what should I aim for over time," Primed for Growth
-  /// answers "how do I look today"). A navigation aid toward a sensible next
-  /// PR, not a coach claiming to know what you'll hit on any given day.
-  /// [valueOf] overrides what "e1RM" means per session — defaults to plain
-  /// weight-based `bestE1rm`; pass `SessionWithSets.bodyweightAdjustedBestE1rm`
-  /// (bound to a bodyweight) for bodyweight-tagged exercises, since their
-  /// `weight` field is only the added/assisted load, not the total load
-  /// moved. [band] is the fixed +/- width around the goal — lb for a normal
-  /// lift, left as a caller-supplied value here since a bodyweight lift's
-  /// caller converts the whole result to reps afterward anyway.
-  static (double low, double goal, double high)? predictNextE1rm(
+  /// Epley's e1RM (`weight × (1 + reps/30)`) with a gender-scaled divisor —
+  /// used only by [predictedOneRepMax], NOT the shared `LiftSet.e1rm`/
+  /// `SessionWithSets.bestE1rm` the rest of the app reads for historical
+  /// e1RM charts (deliberately scoped narrowly to this one number rather
+  /// than changing every e1RM figure in the app on a single flagged
+  /// complaint). Rationale: research on sex differences in fatigue
+  /// resistance suggests women typically show a flatter strength-vs-rep-
+  /// range curve than men (relatively better muscular endurance at a given
+  /// %1RM), so a straight Epley formula — effectively calibrated to a
+  /// steeper, more male-typical drop-off — tends to over-project a female
+  /// lifter's true 1RM from a multi-rep set. **Directional, not a precisely
+  /// sourced correction** — same caveat as every other age/gender
+  /// adjustment in this app (`AgeBucket`, `StrengthStandards`) — a
+  /// placeholder pending the user's own repeated-lift history to check the
+  /// prediction against reality.
+  static double _e1rmForSet(LiftSet set, Gender gender) {
+    if (set.reps <= 1) return set.weight;
+    final divisor = gender == Gender.female ? 36.0 : 30.0;
+    return set.weight * (1 + set.reps / divisor);
+  }
+
+  static double _bestE1rmForGender(SessionWithSets s, Gender gender) {
+    if (s.sets.isEmpty) return 0;
+    return s.sets
+        .map((set) => _e1rmForSet(set, gender))
+        .reduce((a, b) => a > b ? a : b);
+  }
+
+  /// The Goal gauge's "Predicted 1RM" line (`07_SMART_TRENDS.md`) — a
+  /// gender-scaled Epley estimate (see [_e1rmForSet]) from your most recent
+  /// lifting, **no time-based decay**. This used to run through a grace-
+  /// period/taper curve on top (`StrengthStandards.effectiveBestE1rm`,
+  /// since removed entirely); dropped per the user's call that a decay
+  /// model implied more hard science behind 1RM prediction than actually
+  /// exists at this level — "just predicted 1RM based on most recent
+  /// history," not a detraining model. Takes the highest gender-scaled
+  /// e1RM among the last 3 sessions
+  /// (not just the single most recent one) so one unusually light day
+  /// doesn't read as a sudden drop. `null` if nothing's logged yet.
+  static double? predictedOneRepMax(
     List<SessionWithSets> sessions, {
-    double Function(SessionWithSets)? valueOf,
-    double band = 50.0,
+    Gender gender = Gender.female,
   }) {
-    final e1rmOf = valueOf ?? (s) => s.bestE1rm;
+    final withSets = sessions.where((s) => s.sets.isNotEmpty).toList();
+    if (withSets.isEmpty) return null;
+    return withSets
+        .take(3)
+        .map((s) => _bestE1rmForGender(s, gender))
+        .reduce((a, b) => a > b ? a : b);
+  }
+
+  /// The near-term "what to aim for" prediction (`07_SMART_TRENDS.md`
+  /// "Predicted Next — reworked around the user's own characteristic rep
+  /// range"), redesigned to avoid rep-to-1RM conversion **entirely** rather
+  /// than trying to tune the conversion formula further — instead of
+  /// estimating a 1RM from whatever reps you happened to log, it finds the
+  /// rep count you actually tend to go heavy at, and predicts a weight at
+  /// *that same rep count*, so there's no formula converting between rep
+  /// ranges to get wrong in the first place.
+  ///
+  /// 1. **Characteristic reps**: for each session, the rep count on its
+  ///    single heaviest set (by [loadOf]); the most common value across
+  ///    sessions wins (ties broken toward whichever occurred more
+  ///    recently, via scan order).
+  /// 2. **Same-rep history**: for each session, the heaviest weight among
+  ///    sets at exactly that rep count (sessions with none contribute
+  ///    nothing) — a genuinely comparable weight-over-time series, since
+  ///    every point is the same number of reps.
+  /// 3. **Goal**: last same-rep weight + the average session-to-session
+  ///    delta across up to the last 5 same-rep data points. A real newbie
+  ///    stretch (rapid recent gains) and a near-plateau (~flat recent
+  ///    deltas) both fall out of this on their own — no separate "assume
+  ///    they're new" flag needed, the delta just reflects whatever's
+  ///    actually been happening.
+  /// 4. **Confidence band**: narrows as more same-rep history accumulates
+  ///    (`40 / sqrt(n)` lb, clamped 5-40) — an explicit placeholder shape,
+  ///    not derived from real error data yet; revisit once there's enough
+  ///    real usage to check it against, same spirit as every other
+  ///    "directional, not precisely sourced" placeholder in this app.
+  ///
+  /// [loadOf] overrides what counts as a set's "weight" — defaults to the
+  /// raw `LiftSet.weight`; pass a bodyweight-adjusted selector (bodyweight +
+  /// added load) for bodyweight-tagged exercises, since their `weight`
+  /// field is only the added/assisted load on its own.
+  static ({int reps, double low, double goal, double high, int sampleSize})?
+      predictNextAtCharacteristicReps(
+    List<SessionWithSets> sessions, {
+    double Function(LiftSet)? loadOf,
+  }) {
+    final load = loadOf ?? (LiftSet s) => s.weight;
     final withSets = sessions.where((s) => s.sets.isNotEmpty).toList();
     if (withSets.isEmpty) return null;
 
-    // Recent window for the rolling trend (most recent 5 sessions).
-    final recent = withSets.take(5).toList();
-    final e1rms = recent.map(e1rmOf).toList();
-    final avgE1rm = e1rms.reduce((a, b) => a + b) / e1rms.length;
+    final heaviestSetReps = <int>[
+      for (final s in withSets)
+        s.sets.reduce((a, b) => load(a) >= load(b) ? a : b).reps,
+    ];
+    final characteristicReps = _mode(heaviestSetReps);
 
-    final lastSession = recent.first;
-    final lastE1rm = e1rmOf(lastSession);
-    final avgRpe = _averageRpe(lastSession.sets);
+    final sameRepHistory = <double>[]; // date-DESC, matching withSets' order
+    for (final s in withSets) {
+      final atReps = s.sets.where((set) => set.reps == characteristicReps);
+      if (atReps.isEmpty) continue;
+      sameRepHistory.add(atReps.map(load).reduce((a, b) => a > b ? a : b));
+    }
+    if (sameRepHistory.isEmpty) return null;
 
-    // RPE-weighted confidence: near-max effort -> trust the last session's
-    // number more; low effort -> lean on the rolling average instead.
-    final rpeWeight = avgRpe == null ? 0.5 : (avgRpe / 10).clamp(0.2, 1.0);
-    final blended = (lastE1rm * rpeWeight) + (avgE1rm * (1 - rpeWeight));
-
-    // Scale the suggested overload step by the recent trend direction —
-    // same slump-detection comparison `ReadinessEngine.overloadTrendFactor`
-    // uses (last session vs. the average of the prior up-to-3), so a fixed
-    // step doesn't get suggested regardless of whether progress is actually
-    // happening. Real progressive-overload practice: push harder while
-    // trending up, hold/consolidate during a plateau or emerging slump
-    // rather than chasing a new number anyway.
-    final priorWindow = recent.skip(1).take(3).toList();
-    var overloadStep = 1.015; // default: modest nudge when the trend is flat
-    if (priorWindow.isNotEmpty) {
-      final priorAvgE1rm =
-          priorWindow.map(e1rmOf).reduce((a, b) => a + b) / priorWindow.length;
-      if (priorAvgE1rm > 0) {
-        if (lastE1rm < priorAvgE1rm * 0.95) {
-          overloadStep = 1.0; // emerging slump -> consolidate, don't chase a new number
-        } else if (lastE1rm > priorAvgE1rm * 1.02) {
-          overloadStep = 1.03; // clearly trending up -> a bigger ask is reasonable
-        }
-      }
+    final lastWeight = sameRepHistory.first;
+    var avgDelta = 0.0;
+    if (sameRepHistory.length > 1) {
+      // Oldest..newest, so consecutive deltas read as forward progress.
+      final window = sameRepHistory.take(5).toList().reversed.toList();
+      final deltas = [
+        for (var i = 1; i < window.length; i++) window[i] - window[i - 1],
+      ];
+      avgDelta = deltas.reduce((a, b) => a + b) / deltas.length;
     }
 
-    final goal = blended * overloadStep;
+    final goal = lastWeight + avgDelta;
+    final n = sameRepHistory.length;
+    final band = (40 / math.sqrt(n)).clamp(5.0, 40.0);
 
-    return (goal - band, goal, goal + band);
+    return (
+      reps: characteristicReps,
+      low: goal - band,
+      goal: goal,
+      high: goal + band,
+      sampleSize: n,
+    );
+  }
+
+  /// Most frequent value in [values]; ties favor whichever candidate's
+  /// count reaches the max first when scanning in [values]' own order — so
+  /// for a date-DESC list (most recent first), ties lean toward the more
+  /// recently-occurring value.
+  static int _mode(List<int> values) {
+    final counts = <int, int>{};
+    for (final v in values) {
+      counts[v] = (counts[v] ?? 0) + 1;
+    }
+    var best = values.first;
+    var bestCount = 0;
+    for (final v in values) {
+      final c = counts[v]!;
+      if (c > bestCount) {
+        best = v;
+        bestCount = c;
+      }
+    }
+    return best;
   }
 
   static double? _averageRpe(List<LiftSet> sets) {

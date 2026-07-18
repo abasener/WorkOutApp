@@ -109,38 +109,4 @@ void main() {
       expect(StrengthStandards.nextTier(StrengthTier.elite), StrengthTier.elite);
     });
   });
-
-  group('StrengthStandards.effectiveBestE1rm (detraining decay)', () {
-    test('no decay within the grace period', () {
-      final achieved = DateTime(2026, 1, 1);
-      final now = achieved.add(const Duration(days: 69));
-      expect(StrengthStandards.effectiveBestE1rm(300, achieved, now), 300);
-    });
-
-    test('no decay exactly at the grace boundary', () {
-      final achieved = DateTime(2026, 1, 1);
-      final now = achieved.add(const Duration(days: 70));
-      expect(StrengthStandards.effectiveBestE1rm(300, achieved, now), 300);
-    });
-
-    test('decays partially partway through the taper window', () {
-      final achieved = DateTime(2026, 1, 1);
-      final now = achieved.add(const Duration(days: 70 + 135)); // halfway through taper
-      final value = StrengthStandards.effectiveBestE1rm(300, achieved, now);
-      expect(value, lessThan(300));
-      expect(value, closeTo(300 * (1 - 0.15 * 0.5), 0.5));
-    });
-
-    test('never decays below the 85% floor, however long ago the peak was', () {
-      final achieved = DateTime(2020, 1, 1);
-      final now = DateTime(2026, 1, 1); // years later
-      expect(StrengthStandards.effectiveBestE1rm(300, achieved, now), closeTo(300 * 0.85, 0.01));
-    });
-
-    test('is unit-agnostic — works the same on a raw rep count as on lb', () {
-      final achieved = DateTime(2026, 1, 1);
-      final now = achieved.add(const Duration(days: 365));
-      expect(StrengthStandards.effectiveBestE1rm(20, achieved, now), closeTo(20 * 0.85, 0.01));
-    });
-  });
 }

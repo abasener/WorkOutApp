@@ -1,3 +1,5 @@
+import 'package:flutter_body_heatmap/flutter_body_heatmap.dart';
+
 /// Rough body-region tags used to label exercises. An exercise can carry
 /// more than one (e.g. Bench Press: chest + push + arms).
 enum ExerciseCategory { legs, core, arms, back, chest, push, pull }
@@ -103,6 +105,41 @@ extension MovementPatternLabel on MovementPattern {
   bool get isMain => index <= MovementPattern.verticalPull.index;
 }
 
+/// Which target the Goal gauge uses for this exercise — the published
+/// bodyweight-ratio/rep-count standard, or the user's own `custom_goals`
+/// entry. `null` (unset) means auto: standard if one exists, otherwise
+/// custom if the user has set one, otherwise no goal shown. Explicit
+/// `custom` lets the user override a lift that *does* have a standard.
+enum GoalSource { standard, custom }
+
+extension GoalSourceKey on GoalSource {
+  String get key => name;
+  static GoalSource? fromKey(String? key) {
+    for (final v in GoalSource.values) {
+      if (v.name == key) return v;
+    }
+    return null;
+  }
+}
+
+/// Which number leads on Lift detail's near-term prediction and the Goal
+/// gauge — the literal heaviest weight ever logged (no formula), or the
+/// gender-scaled-Epley-projected 1RM. `null` (unset) means auto: `predicted`
+/// for compound/free-weight lifts (where a 1RM estimate is a meaningful,
+/// literature-backed concept), `trueMax` for machine/isolation lifts (where
+/// it much less reliably is — see designFiles/07_SMART_TRENDS.md).
+enum ProgressMetric { predicted, trueMax }
+
+extension ProgressMetricKey on ProgressMetric {
+  String get key => name;
+  static ProgressMetric? fromKey(String? key) {
+    for (final v in ProgressMetric.values) {
+      if (v.name == key) return v;
+    }
+    return null;
+  }
+}
+
 class Exercise {
   final int? id;
   final String name;
@@ -120,6 +157,25 @@ class Exercise {
   /// + that lift's own "+" button) and a Lifts-list quick filter.
   final bool pinned;
 
+  /// `null` = auto (see [GoalSource]'s doc comment).
+  final GoalSource? goalSource;
+
+  /// `null` = auto (see [ProgressMetric]'s doc comment).
+  final ProgressMetric? progressMetric;
+
+  /// Free-text personal notes the user writes themselves — form cues,
+  /// reminders, whatever they want. Replaces the old curated per-lift
+  /// "Overview" cues entirely (`designFiles/03_SCREEN_lifts.md`); `null` =
+  /// nothing written yet.
+  final String? notes;
+
+  /// Fine-grained muscles this exercise targets, set by the user (either at
+  /// creation or later via the muscle-selector popup) — takes priority over
+  /// `MuscleMap.liftMuscles`'s curated fallback when non-empty. Empty for
+  /// exercises that haven't had this set (older installs, or a user who
+  /// skipped it where it was optional).
+  final List<Muscle> targetMuscles;
+
   const Exercise({
     this.id,
     required this.name,
@@ -130,6 +186,10 @@ class Exercise {
     this.youtubeUrl,
     required this.created,
     this.pinned = false,
+    this.goalSource,
+    this.progressMetric,
+    this.notes,
+    this.targetMuscles = const [],
   });
 
   factory Exercise.fromMap(Map<String, dynamic> m) => Exercise(
@@ -157,6 +217,14 @@ class Exercise {
         youtubeUrl: m['youtube_url'] as String?,
         created: m['created'] as String,
         pinned: (m['pinned'] as int?) == 1,
+        goalSource: GoalSourceKey.fromKey(m['goal_source'] as String?),
+        progressMetric: ProgressMetricKey.fromKey(m['progress_metric'] as String?),
+        notes: m['notes'] as String?,
+        targetMuscles: ((m['target_muscles'] as String?) ?? '')
+            .split(',')
+            .where((s) => s.isNotEmpty)
+            .map((key) => Muscle.values.firstWhere((mu) => mu.name == key))
+            .toList(),
       );
 
   Map<String, dynamic> toMap() => {
@@ -168,6 +236,10 @@ class Exercise {
         'youtube_url': youtubeUrl,
         'created': created,
         'pinned': pinned ? 1 : 0,
+        'goal_source': goalSource?.key,
+        'progress_metric': progressMetric?.key,
+        'notes': notes,
+        'target_muscles': targetMuscles.map((m) => m.name).join(','),
       };
 
   Exercise copyWith({
@@ -177,6 +249,17 @@ class Exercise {
     List<MovementPattern>? patterns,
     String? youtubeUrl,
     bool? pinned,
+    // Nullable fields that need to support being explicitly *cleared* (not
+    // just "left unchanged") — pass e.g. `clearGoalSource: true` to reset
+    // to auto rather than passing `goalSource: null` (which `??` would just
+    // ignore).
+    GoalSource? goalSource,
+    bool clearGoalSource = false,
+    ProgressMetric? progressMetric,
+    bool clearProgressMetric = false,
+    String? notes,
+    bool clearNotes = false,
+    List<Muscle>? targetMuscles,
   }) =>
       Exercise(
         id: id,
@@ -186,7 +269,12 @@ class Exercise {
         patterns: patterns ?? this.patterns,
         isSeeded: isSeeded,
         youtubeUrl: youtubeUrl ?? this.youtubeUrl,
+        goalSource: clearGoalSource ? null : (goalSource ?? this.goalSource),
+        progressMetric:
+            clearProgressMetric ? null : (progressMetric ?? this.progressMetric),
         created: created,
         pinned: pinned ?? this.pinned,
+        notes: clearNotes ? null : (notes ?? this.notes),
+        targetMuscles: targetMuscles ?? this.targetMuscles,
       );
 }

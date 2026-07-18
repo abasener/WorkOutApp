@@ -40,6 +40,11 @@ dependencies:
   intl: ^0.20.3
   url_launcher: ^6.3.2
   flutter_body_heatmap: ^0.1.0
+  share_plus: ^11.0.0
+  image_picker: ^1.2.3
+  flutter_local_notifications: ^22.0.1
+  timezone: ^0.11.1
+  flutter_timezone: ^5.1.0
 
 dev_dependencies:
   flutter_test:
@@ -55,16 +60,14 @@ dev_dependencies:
 
 # App icon generation: `dart run flutter_launcher_icons` regenerates every
 # Android density (mipmap-*, legacy + adaptive) from the two source images in
-# assets/icon/ — icon.png is the flattened fallback (logo composited over a
-# soft grey, #3A3A3A — true transparency isn't reliable for an app icon, the
-# Play Store listing icon and pre-adaptive-icon Android both require an
-# opaque image); foreground.png is the logo's own transparency (this source
-# file ships with real alpha, no flat buffer color to key out this round),
-# used as the adaptive-icon foreground layer over that same solid grey.
+# assets/icon/ — icon.png is the flattened fallback (logo composited over
+# the source file's own light background, #EFF3F8); foreground.png is the
+# same logo with that background made transparent, used as the
+# adaptive-icon foreground layer over a solid background of the same color.
 flutter_launcher_icons:
   android: true
   image_path: "assets/icon/icon.png"
-  adaptive_icon_background: "#3A3A3A"
+  adaptive_icon_background: "#EFF3F8"
   adaptive_icon_foreground: "assets/icon/foreground.png"
 
 # For information on the generic Dart part of this file, see the

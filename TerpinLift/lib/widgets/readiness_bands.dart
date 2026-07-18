@@ -22,6 +22,8 @@ abstract class ReadinessBands {
     return AppColors.readinessWellRested;
   }
 
+  static const bandBounds = [0.0, _needsRestMax, _recoveringMax, _readyMax, 1.0];
+
   static String labelFor(double readiness) {
     if (readiness < _needsRestMax) return 'Needs rest';
     if (readiness < _recoveringMax) return 'Recovering';
