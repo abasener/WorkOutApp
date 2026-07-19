@@ -24,7 +24,7 @@ Then create `android/key.properties` (already gitignored — see `android/.gitig
 storePassword=<the keystore password you set>
 keyPassword=<the key password you set>
 keyAlias=upload
-storeFile=app/upload-keystore.jks
+storeFile=upload-keystore.jks
 ```
 
 `android/app/build.gradle.kts` already reads this file and wires it into the `release` build type's signing config (falls back to debug signing if `key.properties` doesn't exist, so `flutter run --release` and CI still work without it).

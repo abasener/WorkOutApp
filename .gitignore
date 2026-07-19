@@ -2,5 +2,10 @@
 # app for debugging/discussion, never meant to be public.
 /reference-data/
 
+# Release-signing backup (keystore + key.properties) — gitignored since this
+# repo is public; move this folder to a private repo/secure storage instead.
+# See release-backup/README.md.
+/release-backup/
+
 # Generic starter-template reference doc, not project-specific.
 flutter_starter_bundle.md
