@@ -10,6 +10,7 @@ import '../../widgets/date_picker_field.dart';
 import '../../widgets/exercise_picker_field.dart';
 import '../../widgets/info_tooltip.dart';
 import '../../widgets/plate_calculator_sheet.dart';
+import '../../widgets/simple_timer_sheet.dart';
 
 class _PendingSet {
   int reps;
@@ -64,7 +65,8 @@ class _LogLiftFormState extends State<LogLiftForm> {
     // unpinned, so opening this form from a specific lift's detail page
     // never shows a picker missing its own exercise.
     final pinned = all.where((e) => e.pinned).toList();
-    final exercises = widget.preselected != null &&
+    final exercises =
+        widget.preselected != null &&
             !pinned.any((e) => e.id == widget.preselected!.id)
         ? [widget.preselected!, ...pinned]
         : pinned;
@@ -72,7 +74,8 @@ class _LogLiftFormState extends State<LogLiftForm> {
     setState(() {
       _allExercises = all;
       _exercises = exercises;
-      _selected = widget.preselected != null &&
+      _selected =
+          widget.preselected != null &&
               exercises.any((e) => e.id == widget.preselected!.id)
           ? exercises.firstWhere((e) => e.id == widget.preselected!.id)
           : (exercises.isNotEmpty ? exercises.first : null);
@@ -88,17 +91,21 @@ class _LogLiftFormState extends State<LogLiftForm> {
       exerciseId: _selected!.id!,
       date: dateStr,
       sets: _sets
-          .map((s) => LiftSet(
-                sessionId: 0,
-                setNumber: 0,
-                reps: s.reps,
-                weight: s.weightLb,
-                rpe: s.rpe,
-              ))
+          .map(
+            (s) => LiftSet(
+              sessionId: 0,
+              setNumber: 0,
+              reps: s.reps,
+              weight: s.weightLb,
+              rpe: s.rpe,
+            ),
+          )
           .toList(),
       startedAt: _trackTime ? _openedAt.toIso8601String() : null,
       completedAt: _trackTime ? DateTime.now().toIso8601String() : null,
-      notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
+      notes: _notesController.text.trim().isEmpty
+          ? null
+          : _notesController.text.trim(),
     );
     AppServices.signalReload();
     if (mounted) Navigator.pop(context);
@@ -108,7 +115,9 @@ class _LogLiftFormState extends State<LogLiftForm> {
   Widget build(BuildContext context) {
     final screenHeight = MediaQuery.of(context).size.height;
     return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
       child: Container(
         constraints: BoxConstraints(
           minHeight: screenHeight * 0.5,
@@ -116,7 +125,9 @@ class _LogLiftFormState extends State<LogLiftForm> {
         ),
         decoration: const BoxDecoration(
           color: AppColors.surfaceRaised,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.card)),
+          borderRadius: BorderRadius.vertical(
+            top: Radius.circular(AppRadius.card),
+          ),
         ),
         padding: EdgeInsets.fromLTRB(
           AppSpacing.edge,
@@ -125,7 +136,9 @@ class _LogLiftFormState extends State<LogLiftForm> {
           AppSpacing.standard + MediaQuery.of(context).padding.bottom,
         ),
         child: _loading
-            ? const Center(child: CircularProgressIndicator(color: AppColors.accent))
+            ? const Center(
+                child: CircularProgressIndicator(color: AppColors.accent),
+              )
             : SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -159,7 +172,10 @@ class _LogLiftFormState extends State<LogLiftForm> {
                           style: OutlinedButton.styleFrom(
                             side: const BorderSide(color: AppColors.border),
                             foregroundColor: AppColors.textPrimary,
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
                           ),
                           onPressed: () => showModalBottomSheet(
                             context: context,
@@ -170,13 +186,27 @@ class _LogLiftFormState extends State<LogLiftForm> {
                           icon: const Icon(Icons.calculate_outlined, size: 16),
                           label: const Text('Calc'),
                         ),
+                        const SizedBox(width: AppSpacing.small),
+                        OutlinedButton(
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(color: AppColors.border),
+                            foregroundColor: AppColors.textPrimary,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
+                          ),
+                          onPressed: () => SimpleTimerSheet.show(context),
+                          child: const Icon(Icons.timer_outlined, size: 16),
+                        ),
                       ],
                     ),
                     const SizedBox(height: AppSpacing.standard),
                     if (_allExercises.isEmpty)
                       Text(
-                          'No exercises yet — add one from the Lifts tab first.',
-                          style: AppText.smallText)
+                        'No exercises yet. Add one from the Lifts tab first.',
+                        style: AppText.smallText,
+                      )
                     else ...[
                       ExercisePickerField(
                         allOptions: _allExercises,
@@ -193,10 +223,14 @@ class _LogLiftFormState extends State<LogLiftForm> {
                           foregroundColor: AppColors.textPrimary,
                           minimumSize: const Size(double.infinity, 44),
                         ),
-                        onPressed: () => setState(() => _sets.add(_PendingSet(
+                        onPressed: () => setState(
+                          () => _sets.add(
+                            _PendingSet(
                               reps: _sets.last.reps,
                               weightLb: _sets.last.weightLb,
-                            ))),
+                            ),
+                          ),
+                        ),
                         icon: const Icon(Icons.add),
                         label: const Text('Add another set'),
                       ),
@@ -205,8 +239,9 @@ class _LogLiftFormState extends State<LogLiftForm> {
                         controller: _notesController,
                         style: AppText.bodyText,
                         maxLines: 2,
-                        decoration:
-                            const InputDecoration(labelText: 'Notes (optional)'),
+                        decoration: const InputDecoration(
+                          labelText: 'Notes (optional)',
+                        ),
                       ),
                       const SizedBox(height: AppSpacing.large),
                       SizedBox(
@@ -217,7 +252,10 @@ class _LogLiftFormState extends State<LogLiftForm> {
                             backgroundColor: AppColors.accent,
                             foregroundColor: Colors.white,
                             shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(AppRadius.button)),
+                              borderRadius: BorderRadius.circular(
+                                AppRadius.button,
+                              ),
+                            ),
                           ),
                           onPressed: _saving ? null : _submit,
                           child: _saving
@@ -225,7 +263,10 @@ class _LogLiftFormState extends State<LogLiftForm> {
                                   width: 20,
                                   height: 20,
                                   child: CircularProgressIndicator(
-                                      strokeWidth: 2, color: Colors.white))
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
                               : const Text('Done'),
                         ),
                       ),
@@ -249,7 +290,9 @@ class _LogLiftFormState extends State<LogLiftForm> {
             visualDensity: VisualDensity.compact,
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(),
-            onPressed: _sets.length <= 1 ? null : () => setState(() => _sets.removeAt(i)),
+            onPressed: _sets.length <= 1
+                ? null
+                : () => setState(() => _sets.removeAt(i)),
             icon: const Icon(Icons.remove_circle_outline, size: 18),
             color: AppColors.textSecondary,
             disabledColor: AppColors.border,
@@ -270,9 +313,13 @@ class _LogLiftFormState extends State<LogLiftForm> {
             child: TextFormField(
               key: ValueKey('weight_$i'),
               initialValue: Units.displayValue(set.weightLb).toStringAsFixed(0),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
               style: AppText.bodyText,
-              decoration: InputDecoration(labelText: 'Weight (${Units.suffix})'),
+              decoration: InputDecoration(
+                labelText: 'Weight (${Units.suffix})',
+              ),
               onChanged: (v) {
                 final entered = double.tryParse(v);
                 if (entered != null) set.weightLb = Units.toLb(entered);
@@ -283,17 +330,25 @@ class _LogLiftFormState extends State<LogLiftForm> {
           Expanded(
             child: TextFormField(
               key: ValueKey('rpe_$i'),
-              initialValue:
-                  set.rpe != null ? EffortDisplay.toDisplay(set.rpe!).toStringAsFixed(0) : '',
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              initialValue: set.rpe != null
+                  ? EffortDisplay.toDisplay(set.rpe!).toStringAsFixed(0)
+                  : '',
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
               style: AppText.bodyText,
               decoration: InputDecoration(
                 labelText: 'Reps left',
-                suffixIcon: const InfoTooltip(glossaryKey: 'rpe', title: 'Reps left'),
+                suffixIcon: const InfoTooltip(
+                  glossaryKey: 'rpe',
+                  title: 'Reps left',
+                ),
               ),
               onChanged: (v) {
                 final entered = double.tryParse(v);
-                set.rpe = entered == null ? null : EffortDisplay.fromDisplay(entered);
+                set.rpe = entered == null
+                    ? null
+                    : EffortDisplay.fromDisplay(entered);
               },
             ),
           ),

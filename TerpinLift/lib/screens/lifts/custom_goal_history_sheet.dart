@@ -4,6 +4,7 @@ import '../../data/models/custom_goal.dart';
 import '../../services/app_services.dart';
 import '../../services/units.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/tap_icon.dart';
 
 /// A small log of custom goals for one exercise — add, name, and browse past
 /// targets, rather than a single overwritable value. The most recent entry
@@ -117,7 +118,7 @@ class _CustomGoalHistorySheetState extends State<CustomGoalHistorySheet> {
                     Text('Your Goals', style: AppText.subHeader),
                     const SizedBox(height: AppSpacing.micro),
                     Text(
-                      'The newest entry is what drives the gauge — older ones stay here as '
+                      'The newest entry is what drives the gauge. Older ones stay here as '
                       'history.',
                       style: AppText.smallText,
                     ),
@@ -202,13 +203,10 @@ class _CustomGoalHistorySheetState extends State<CustomGoalHistorySheet> {
                                     ],
                                   ),
                                 ),
-                                GestureDetector(
+                                TapIcon(
+                                  icon: Icons.delete_outline,
+                                  size: 20,
                                   onTap: () => _delete(g),
-                                  child: const Icon(
-                                    Icons.delete_outline,
-                                    size: 20,
-                                    color: AppColors.textSecondary,
-                                  ),
                                 ),
                               ],
                             ),

@@ -8,13 +8,16 @@ import '../../data/models/metric_entry.dart';
 import '../../data/models/progress_photo.dart';
 import '../../services/app_services.dart';
 import '../../services/metric_chart_points.dart';
+import '../../services/metric_layout_settings.dart';
 import '../../services/muscle_map.dart';
 import '../../services/trend_engine.dart';
 import '../../services/units.dart';
+import '../../services/user_profile.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/app_card.dart';
 import '../../widgets/labeled_trend_chart.dart';
 import '../../widgets/progress_photo_timeline.dart';
+import '../../widgets/tap_icon.dart';
 import '../quick_log/log_simple_metric_form.dart';
 import '../quick_log/soreness_body_map_form.dart';
 import 'custom_metric_builder_sheet.dart';
@@ -42,6 +45,7 @@ class _MetricsScreenState extends State<MetricsScreen>
   );
 
   bool _loading = true;
+  bool _editingMetrics = false;
   final Map<MetricType, List<MetricEntry>> _entries = {};
   List<MetricEntry> _allMetrics = [];
   List<BodyweightEntry> _bodyweight = [];
@@ -56,6 +60,11 @@ class _MetricsScreenState extends State<MetricsScreen>
   void initState() {
     super.initState();
     AppServices.reloadSignal.addListener(_load);
+    // Edit mode is Overview-only — rebuild so its AppBar actions (and any
+    // active edit mode) drop away when the Days tab is showing instead.
+    _tabController.addListener(() {
+      if (!_tabController.indexIsChanging) setState(() {});
+    });
     _load();
   }
 
@@ -93,7 +102,8 @@ class _MetricsScreenState extends State<MetricsScreen>
     final customMetrics = await AppServices.customMetrics.getAllDefinitions();
     final customMetricEntries = <int, List<CustomMetricEntry>>{};
     for (final metric in customMetrics) {
-      customMetricEntries[metric.id!] = await AppServices.customMetrics.getEntries(metric.id!);
+      customMetricEntries[metric.id!] = await AppServices.customMetrics
+          .getEntries(metric.id!);
     }
 
     if (!mounted) return;
@@ -136,7 +146,10 @@ class _MetricsScreenState extends State<MetricsScreen>
   /// Less discoverable than a tab, but the user's own call: this is "the
   /// easy place to see all the exact numbers/tags" for one metric at a
   /// time, which the Days tab's everything-by-date layout doesn't give you.
-  Future<void> _showMetricHistory(String title, List<MetricHistoryRow> rows) async {
+  Future<void> _showMetricHistory(
+    String title,
+    List<MetricHistoryRow> rows,
+  ) async {
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -145,35 +158,46 @@ class _MetricsScreenState extends State<MetricsScreen>
     );
   }
 
-  List<MetricHistoryRow> _stepsHistoryRows() => (_entries[MetricType.steps] ?? [])
-      .map((e) => MetricHistoryRow(
-            date: e.date,
-            valueText: e.value.round().toString(),
-            onEdit: () => _editSimpleMetric(SimpleMetricKind.steps, e),
-          ))
-      .toList();
+  List<MetricHistoryRow> _stepsHistoryRows() =>
+      (_entries[MetricType.steps] ?? [])
+          .map(
+            (e) => MetricHistoryRow(
+              date: e.date,
+              valueText: e.value.round().toString(),
+              onEdit: () => _editSimpleMetric(SimpleMetricKind.steps, e),
+            ),
+          )
+          .toList();
 
-  List<MetricHistoryRow> _sleepHistoryRows() => (_entries[MetricType.sleepHours] ?? [])
-      .map((e) => MetricHistoryRow(
-            date: e.date,
-            valueText: '${e.value.toStringAsFixed(1)} hrs',
-            onEdit: () => _editSimpleMetric(SimpleMetricKind.sleep, e),
-          ))
-      .toList();
+  List<MetricHistoryRow> _sleepHistoryRows() =>
+      (_entries[MetricType.sleepHours] ?? [])
+          .map(
+            (e) => MetricHistoryRow(
+              date: e.date,
+              valueText: '${e.value.toStringAsFixed(1)} hrs',
+              onEdit: () => _editSimpleMetric(SimpleMetricKind.sleep, e),
+            ),
+          )
+          .toList();
 
   List<MetricHistoryRow> _weightHistoryRows() => _bodyweight
-      .map((e) => MetricHistoryRow(
-            date: e.date,
-            valueText: Units.formatMaskable(e.weight),
-            onEdit: () => _editBodyweight(e),
-          ))
+      .map(
+        (e) => MetricHistoryRow(
+          date: e.date,
+          valueText: Units.formatMaskable(e.weight),
+          onEdit: () => _editBodyweight(e),
+        ),
+      )
       .toList();
 
   /// Derived, not logged — no `onEdit` on any row, since there's no single
   /// entry behind a given date's number to correct (it's the planned-
   /// session span, or a sum of lift Track Time windows).
-  List<MetricHistoryRow> _workoutDurationHistoryRows() => _workoutDurationByDate.entries
-      .map((e) => MetricHistoryRow(date: e.key, valueText: '${e.value.round()}m'))
+  List<MetricHistoryRow> _workoutDurationHistoryRows() => _workoutDurationByDate
+      .entries
+      .map(
+        (e) => MetricHistoryRow(date: e.key, valueText: '${e.value.round()}m'),
+      )
       .toList();
 
   /// Same per-day region grouping the Days tab uses for soreness, just
@@ -187,14 +211,16 @@ class _MetricsScreenState extends State<MetricsScreen>
       }
     }
     return byDate.entries
-        .map((entry) => MetricHistoryRow(
-              date: entry.key,
-              tags: [
-                for (final e in entry.value)
-                  '${e.metricType.sorenessRegion!.label} (${e.value.round()})',
-              ],
-              onEdit: () => _editSorenessDay(entry.key),
-            ))
+        .map(
+          (entry) => MetricHistoryRow(
+            date: entry.key,
+            tags: [
+              for (final e in entry.value)
+                '${e.metricType.sorenessRegion!.label} (${e.value.round()})',
+            ],
+            onEdit: () => _editSorenessDay(entry.key),
+          ),
+        )
         .toList();
   }
 
@@ -293,12 +319,16 @@ class _MetricsScreenState extends State<MetricsScreen>
 
   /// Days-tab pencil for a custom metric row — same entry sheet as logging
   /// a new value, just pre-filled and replacing the specific entry tapped.
-  Future<void> _editCustomMetricEntry(CustomMetric metric, CustomMetricEntry entry) async {
+  Future<void> _editCustomMetricEntry(
+    CustomMetric metric,
+    CustomMetricEntry entry,
+  ) async {
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => CustomMetricEntrySheet(metric: metric, editingEntry: entry),
+      builder: (_) =>
+          CustomMetricEntrySheet(metric: metric, editingEntry: entry),
     );
   }
 
@@ -319,7 +349,10 @@ class _MetricsScreenState extends State<MetricsScreen>
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete', style: TextStyle(color: AppColors.accent)),
+            child: const Text(
+              'Delete',
+              style: TextStyle(color: AppColors.accent),
+            ),
           ),
         ],
       ),
@@ -331,7 +364,10 @@ class _MetricsScreenState extends State<MetricsScreen>
   }
 
   List<ChartPoint> _customMetricPoints(CustomMetric metric, DateTime cutoff) =>
-      MetricChartPoints.customMetric(_customMetricEntries[metric.id] ?? [], cutoff);
+      MetricChartPoints.customMetric(
+        _customMetricEntries[metric.id] ?? [],
+        cutoff,
+      );
 
   String Function(double)? _customMetricYFormatter(CustomMetric metric) =>
       MetricChartPoints.customYFormatter(metric);
@@ -363,6 +399,19 @@ class _MetricsScreenState extends State<MetricsScreen>
       appBar: AppBar(
         title: const Text('Metrics'),
         actions: [
+          if (_tabController.index == 0 && _editingMetrics)
+            IconButton(
+              icon: const Icon(Icons.visibility_outlined),
+              tooltip: 'Show a hidden card',
+              onPressed: _addMetricCardMenu,
+            ),
+          if (_tabController.index == 0)
+            IconButton(
+              icon: Icon(_editingMetrics ? Icons.check : Icons.edit_outlined),
+              tooltip: _editingMetrics ? 'Done editing' : 'Edit cards',
+              onPressed: () =>
+                  setState(() => _editingMetrics = !_editingMetrics),
+            ),
           IconButton(
             icon: const Icon(Icons.add),
             tooltip: 'New metric',
@@ -387,117 +436,193 @@ class _MetricsScreenState extends State<MetricsScreen>
     );
   }
 
-  Widget _buildOverviewTab(DateTime cutoff) {
-    return ListView(
-      padding: const EdgeInsets.all(AppSpacing.edge),
-      children: [
-        _metricCard(
+  // ---- Overview tab card order/visibility ("edit mode," mirrors Home) ----
+
+  List<MetricLayoutItem> get _defaultMetricOrder => [
+    const MetricLayoutItem(MetricWidgetId.steps),
+    const MetricLayoutItem(MetricWidgetId.sleep),
+    const MetricLayoutItem(MetricWidgetId.workoutDuration),
+    const MetricLayoutItem(MetricWidgetId.soreness),
+    const MetricLayoutItem(MetricWidgetId.weight),
+    if (UserProfile.gender == Gender.female)
+      const MetricLayoutItem(MetricWidgetId.cycle),
+    const MetricLayoutItem(MetricWidgetId.progressPhotos),
+    for (final m in _customMetrics)
+      if (m.id != null)
+        MetricLayoutItem(MetricWidgetId.customMetric, customMetricId: m.id),
+  ];
+
+  /// Reconciles the persisted order against current reality: drops a
+  /// `cycle` entry if the profile is no longer female (even if it was
+  /// customized while female), drops a `customMetric` entry whose metric
+  /// was actually deleted (not just hidden), and appends any custom metric
+  /// created since the order was last saved so a brand-new metric doesn't
+  /// silently vanish from the screen.
+  List<MetricLayoutItem> get _currentMetricOrder {
+    final base = MetricLayoutSettings.order ?? _defaultMetricOrder;
+    final customIds = _customMetrics.map((m) => m.id).whereType<int>().toSet();
+    final reconciled = base.where((i) {
+      if (i.type == MetricWidgetId.cycle) {
+        return UserProfile.gender == Gender.female;
+      }
+      if (i.type == MetricWidgetId.customMetric) {
+        return customIds.contains(i.customMetricId);
+      }
+      return true;
+    }).toList();
+    final presentCustomIds = reconciled
+        .where((i) => i.type == MetricWidgetId.customMetric)
+        .map((i) => i.customMetricId)
+        .toSet();
+    for (final m in _customMetrics) {
+      if (m.id != null && !presentCustomIds.contains(m.id)) {
+        reconciled.add(
+          MetricLayoutItem(MetricWidgetId.customMetric, customMetricId: m.id),
+        );
+      }
+    }
+    return reconciled;
+  }
+
+  Future<void> _persistMetricOrder(List<MetricLayoutItem> order) async {
+    await AppServices.setMetricWidgetOrder(order);
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _reorderMetricCards(int oldIndex, int newIndex) async {
+    final order = [..._currentMetricOrder];
+    if (newIndex > oldIndex) newIndex -= 1;
+    final item = order.removeAt(oldIndex);
+    order.insert(newIndex, item);
+    await _persistMetricOrder(order);
+  }
+
+  Future<void> _hideMetricCard(MetricLayoutItem item) async {
+    final order = [..._currentMetricOrder]..remove(item);
+    await _persistMetricOrder(order);
+  }
+
+  Future<void> _addMetricCardMenu() async {
+    final order = _currentMetricOrder;
+    final hiddenFixed = MetricWidgetId.values.where((id) {
+      if (id == MetricWidgetId.customMetric) return false;
+      if (id == MetricWidgetId.cycle && UserProfile.gender != Gender.female) {
+        return false;
+      }
+      return !order.any((i) => i.type == id);
+    }).toList();
+    final hiddenCustom = _customMetrics.where((m) {
+      return m.id != null &&
+          !order.any(
+            (i) =>
+                i.type == MetricWidgetId.customMetric &&
+                i.customMetricId == m.id,
+          );
+    }).toList();
+
+    final picked = await showModalBottomSheet<MetricLayoutItem>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.edge,
+          AppSpacing.standard,
+          AppSpacing.edge,
+          AppSpacing.large,
+        ),
+        decoration: const BoxDecoration(
+          color: AppColors.surfaceRaised,
+          borderRadius: BorderRadius.vertical(
+            top: Radius.circular(AppRadius.card),
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Add a card', style: AppText.subHeader),
+            const SizedBox(height: AppSpacing.standard),
+            if (hiddenFixed.isEmpty && hiddenCustom.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  vertical: AppSpacing.standard,
+                ),
+                child: Text(
+                  'Everything is already shown.',
+                  style: AppText.smallText,
+                ),
+              )
+            else ...[
+              for (final id in hiddenFixed)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(id.icon, color: AppColors.textSecondary),
+                  title: Text(id.label, style: AppText.bodyText),
+                  onTap: () => Navigator.pop(context, MetricLayoutItem(id)),
+                ),
+              for (final m in hiddenCustom)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(
+                    Icons.show_chart,
+                    color: AppColors.textSecondary,
+                  ),
+                  title: Text(m.name, style: AppText.bodyText),
+                  onTap: () => Navigator.pop(
+                    context,
+                    MetricLayoutItem(
+                      MetricWidgetId.customMetric,
+                      customMetricId: m.id,
+                    ),
+                  ),
+                ),
+            ],
+          ],
+        ),
+      ),
+    );
+    if (picked == null) return;
+    await _persistMetricOrder([..._currentMetricOrder, picked]);
+  }
+
+  Widget _buildMetricCard(MetricLayoutItem item, DateTime cutoff) {
+    switch (item.type) {
+      case MetricWidgetId.steps:
+        return _metricCard(
           'Steps',
           _points(MetricType.steps, cutoff),
           showPrediction: true,
           trendWindowDays: 21,
           onAdd: () => _logSimpleMetric(SimpleMetricKind.steps),
           onHistory: () => _showMetricHistory('Steps', _stepsHistoryRows()),
-        ),
-        const SizedBox(height: AppSpacing.cardGap),
-        _metricCard(
+        );
+      case MetricWidgetId.sleep:
+        return _metricCard(
           'Sleep (hrs)',
           _points(MetricType.sleepHours, cutoff),
           trendWindowDays: 30,
           onAdd: () => _logSimpleMetric(SimpleMetricKind.sleep),
           onHistory: () => _showMetricHistory('Sleep', _sleepHistoryRows()),
-        ),
-        const SizedBox(height: AppSpacing.cardGap),
-        // No "+" here — Workout Duration is derived (planned sessions /
+        );
+      case MetricWidgetId.workoutDuration:
+        // No "+" here. Workout Duration is derived (planned sessions /
         // lift Track Time), never manually logged, so there's nothing to
-        // add. Notebook still applies — it just shows the computed number
+        // add. Notebook still applies, it just shows the computed number
         // per date, with no edit hook on any row.
-        _metricCard(
+        return _metricCard(
           'Workout Duration (min)',
           _workoutDurationPoints(cutoff),
           trendWindowDays: 30,
           yFormatter: (v) => '${v.round()}m',
-          onHistory: () =>
-              _showMetricHistory('Workout Duration', _workoutDurationHistoryRows()),
-        ),
-        const SizedBox(height: AppSpacing.cardGap),
-        AppCard(
-          onTap: _openSorenessForm,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Text('Soreness', style: AppText.bodyText),
-                  const Spacer(),
-                  GestureDetector(
-                    onTap: () => _showMetricHistory('Soreness', _sorenessHistoryRows()),
-                    child: const Icon(Icons.menu_book_outlined,
-                        size: 20, color: AppColors.textSecondary),
-                  ),
-                ],
-              ),
-              const SizedBox(height: AppSpacing.small),
-              SizedBox(
-                height: 140,
-                width: double.infinity,
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: AspectRatio(
-                        aspectRatio: 724 / 1448,
-                        child: BodyHeatmap(
-                          side: BodySide.front,
-                          data: {
-                            for (final entry in _latestSoreness.entries)
-                              for (final muscle
-                                  in MuscleMap.sorenessRegionGroups[entry.key] ??
-                                      const <Muscle>[])
-                                muscle: MuscleData(
-                                  intensity: entry.value / 5.0,
-                                ),
-                          },
-                          colors: const [
-                            AppColors.surfaceRaised,
-                            AppColors.muscleHigh,
-                          ],
-                          bodyColor: AppColors.surfaceRaised,
-                          borderColor: AppColors.textSecondary,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: AppSpacing.standard),
-                    Expanded(
-                      child: AspectRatio(
-                        aspectRatio: 724 / 1448,
-                        child: BodyHeatmap(
-                          side: BodySide.back,
-                          data: {
-                            for (final entry in _latestSoreness.entries)
-                              for (final muscle
-                                  in MuscleMap.sorenessRegionGroups[entry.key] ??
-                                      const <Muscle>[])
-                                muscle: MuscleData(
-                                  intensity: entry.value / 5.0,
-                                ),
-                          },
-                          colors: const [
-                            AppColors.surfaceRaised,
-                            AppColors.muscleHigh,
-                          ],
-                          bodyColor: AppColors.surfaceRaised,
-                          borderColor: AppColors.textSecondary,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+          onHistory: () => _showMetricHistory(
+            'Workout Duration',
+            _workoutDurationHistoryRows(),
           ),
-        ),
-        const SizedBox(height: AppSpacing.cardGap),
-        _metricCard(
+        );
+      case MetricWidgetId.soreness:
+        return _buildSorenessCard();
+      case MetricWidgetId.weight:
+        return _metricCard(
           'Weight (weekly avg)',
           _weeklyBodyweightPoints(cutoff),
           showPrediction: true,
@@ -505,95 +630,230 @@ class _MetricsScreenState extends State<MetricsScreen>
           yFormatter: (v) => Units.formatMaskable(v),
           onAdd: () => _logSimpleMetric(SimpleMetricKind.bodyweight),
           onHistory: () => _showMetricHistory('Weight', _weightHistoryRows()),
-        ),
-        const SizedBox(height: AppSpacing.cardGap),
-        // Cycle card: deliberately nondescript, no preview chart, per
-        // designFiles/00_UX_DESIGN.md privacy rules.
-        AppCard(
-          onTap: () => Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const CycleDetailScreen()),
+        );
+      case MetricWidgetId.cycle:
+        return _buildCycleCard();
+      case MetricWidgetId.progressPhotos:
+        return _buildProgressPhotosCard();
+      case MetricWidgetId.customMetric:
+        final metric = _customMetrics.firstWhere(
+          (m) => m.id == item.customMetricId,
+          orElse: () => _customMetrics.first,
+        );
+        return _buildCustomMetricCard(metric, cutoff);
+    }
+  }
+
+  // Cycle card: deliberately nondescript, no preview chart, per
+  // designFiles/00_UX_DESIGN.md privacy rules.
+  Widget _buildCycleCard() {
+    return AppCard(
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const CycleDetailScreen()),
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.calendar_today_outlined,
+            color: AppColors.textSecondary,
+            size: 20,
           ),
-          child: Row(
+          const SizedBox(width: AppSpacing.standard),
+          Expanded(child: Text('Cycle', style: AppText.bodyText)),
+          Text('$_cycleFlowDaysCount days logged', style: AppText.smallText),
+          const SizedBox(width: AppSpacing.small),
+          const Icon(Icons.chevron_right, color: AppColors.textSecondary),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSorenessCard() {
+    return AppCard(
+      onTap: _openSorenessForm,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              const Icon(
-                Icons.calendar_today_outlined,
-                color: AppColors.textSecondary,
+              Text('Soreness', style: AppText.bodyText),
+              const Spacer(),
+              TapIcon(
+                icon: Icons.menu_book_outlined,
                 size: 20,
+                onTap: () =>
+                    _showMetricHistory('Soreness', _sorenessHistoryRows()),
               ),
-              const SizedBox(width: AppSpacing.standard),
-              Expanded(child: Text('Cycle', style: AppText.bodyText)),
-              Text(
-                '$_cycleFlowDaysCount days logged',
-                style: AppText.smallText,
-              ),
-              const SizedBox(width: AppSpacing.small),
-              const Icon(Icons.chevron_right, color: AppColors.textSecondary),
             ],
           ),
-        ),
-        const SizedBox(height: AppSpacing.cardGap),
-        AppCard(
-          onTap: _openProgressPhotos,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Text('Progress Photos', style: AppText.bodyText),
-                  const Spacer(),
-                  GestureDetector(
-                    onTap: _addProgressPhoto,
-                    child: const Icon(Icons.camera_alt_outlined,
-                        size: 20, color: AppColors.textSecondary),
-                  ),
-                ],
-              ),
-              const SizedBox(height: AppSpacing.small),
-              ProgressPhotoTimeline(photos: _progressPhotos),
-            ],
-          ),
-        ),
-        for (final metric in _customMetrics) ...[
-          const SizedBox(height: AppSpacing.cardGap),
-          AppCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          const SizedBox(height: AppSpacing.small),
+          SizedBox(
+            height: 140,
+            width: double.infinity,
+            child: Row(
               children: [
-                Row(
-                  children: [
-                    Text(metric.name, style: AppText.bodyText),
-                    const Spacer(),
-                    GestureDetector(
-                      onTap: () => _viewCustomMetricHistory(metric),
-                      child: const Icon(Icons.menu_book_outlined,
-                          size: 20, color: AppColors.textSecondary),
+                Expanded(
+                  child: AspectRatio(
+                    aspectRatio: 724 / 1448,
+                    child: BodyHeatmap(
+                      side: BodySide.front,
+                      data: {
+                        for (final entry in _latestSoreness.entries)
+                          for (final muscle
+                              in MuscleMap.sorenessRegionGroups[entry.key] ??
+                                  const <Muscle>[])
+                            muscle: MuscleData(intensity: entry.value / 5.0),
+                      },
+                      colors: const [
+                        AppColors.surfaceRaised,
+                        AppColors.muscleHigh,
+                      ],
+                      bodyColor: AppColors.surfaceRaised,
+                      borderColor: AppColors.textSecondary,
                     ),
-                    const SizedBox(width: AppSpacing.standard),
-                    GestureDetector(
-                      onTap: () => _logCustomMetric(metric),
-                      child: const Icon(Icons.add_circle_outline,
-                          size: 20, color: AppColors.textSecondary),
-                    ),
-                    const SizedBox(width: AppSpacing.standard),
-                    GestureDetector(
-                      onTap: () => _deleteCustomMetric(metric),
-                      child: const Icon(Icons.delete_outline,
-                          size: 20, color: AppColors.textSecondary),
-                    ),
-                  ],
+                  ),
                 ),
-                const SizedBox(height: AppSpacing.small),
-                LabeledTrendChart(
-                  points: _customMetricPoints(metric, cutoff),
-                  yLabelFormatter: _customMetricYFormatter(metric),
-                  height: 130,
+                const SizedBox(width: AppSpacing.standard),
+                Expanded(
+                  child: AspectRatio(
+                    aspectRatio: 724 / 1448,
+                    child: BodyHeatmap(
+                      side: BodySide.back,
+                      data: {
+                        for (final entry in _latestSoreness.entries)
+                          for (final muscle
+                              in MuscleMap.sorenessRegionGroups[entry.key] ??
+                                  const <Muscle>[])
+                            muscle: MuscleData(intensity: entry.value / 5.0),
+                      },
+                      colors: const [
+                        AppColors.surfaceRaised,
+                        AppColors.muscleHigh,
+                      ],
+                      bodyColor: AppColors.surfaceRaised,
+                      borderColor: AppColors.textSecondary,
+                    ),
+                  ),
                 ),
               ],
             ),
           ),
         ],
-        const SizedBox(height: AppSpacing.xLarge),
+      ),
+    );
+  }
+
+  Widget _buildProgressPhotosCard() {
+    return AppCard(
+      onTap: _openProgressPhotos,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text('Progress Photos', style: AppText.bodyText),
+              const Spacer(),
+              TapIcon(
+                icon: Icons.camera_alt_outlined,
+                size: 20,
+                onTap: _addProgressPhoto,
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.small),
+          ProgressPhotoTimeline(photos: _progressPhotos),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCustomMetricCard(CustomMetric metric, DateTime cutoff) {
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(metric.name, style: AppText.bodyText),
+              const Spacer(),
+              TapIcon(
+                icon: Icons.menu_book_outlined,
+                size: 20,
+                onTap: () => _viewCustomMetricHistory(metric),
+              ),
+              TapIcon(
+                icon: Icons.add_circle_outline,
+                size: 20,
+                onTap: () => _logCustomMetric(metric),
+              ),
+              TapIcon(
+                icon: Icons.delete_outline,
+                size: 20,
+                onTap: () => _deleteCustomMetric(metric),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.small),
+          LabeledTrendChart(
+            points: _customMetricPoints(metric, cutoff),
+            yLabelFormatter: _customMetricYFormatter(metric),
+            height: 130,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOverviewTab(DateTime cutoff) {
+    final order = _currentMetricOrder;
+
+    if (!_editingMetrics) {
+      return ListView(
+        padding: const EdgeInsets.all(AppSpacing.edge),
+        children: [
+          for (final item in order) ...[
+            _buildMetricCard(item, cutoff),
+            const SizedBox(height: AppSpacing.cardGap),
+          ],
+        ],
+      );
+    }
+
+    return ReorderableListView(
+      padding: const EdgeInsets.all(AppSpacing.edge),
+      onReorder: _reorderMetricCards,
+      children: [
+        for (final item in order)
+          Padding(
+            key: ValueKey(item.token),
+            padding: const EdgeInsets.only(bottom: AppSpacing.cardGap),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: IgnorePointer(child: _buildMetricCard(item, cutoff)),
+                ),
+                TapIcon(
+                  icon: Icons.visibility_off_outlined,
+                  onTap: () => _hideMetricCard(item),
+                ),
+                ReorderableDragStartListener(
+                  index: order.indexOf(item),
+                  child: const Padding(
+                    padding: EdgeInsets.only(
+                      left: AppSpacing.small,
+                      top: AppSpacing.small,
+                    ),
+                    child: Icon(
+                      Icons.drag_handle,
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
       ],
     );
   }
@@ -622,19 +882,13 @@ class _MetricsScreenState extends State<MetricsScreen>
               Text(title, style: AppText.bodyText),
               if (onHistory != null || onAdd != null) const Spacer(),
               if (onHistory != null)
-                GestureDetector(
+                TapIcon(
+                  icon: Icons.menu_book_outlined,
+                  size: 20,
                   onTap: onHistory,
-                  child: const Icon(Icons.menu_book_outlined,
-                      size: 20, color: AppColors.textSecondary),
                 ),
-              if (onHistory != null && onAdd != null)
-                const SizedBox(width: AppSpacing.standard),
               if (onAdd != null)
-                GestureDetector(
-                  onTap: onAdd,
-                  child: const Icon(Icons.add_circle_outline,
-                      size: 20, color: AppColors.textSecondary),
-                ),
+                TapIcon(icon: Icons.add_circle_outline, size: 20, onTap: onAdd),
             ],
           ),
           const SizedBox(height: AppSpacing.small),
@@ -657,14 +911,16 @@ class _MetricsScreenState extends State<MetricsScreen>
   Widget _buildDaysTab() {
     final rows = <_DayRow>[];
     for (final e in _bodyweight) {
-      rows.add(_DayRow(
-        date: e.date,
-        sortKey: e.date,
-        icon: Icons.balance,
-        label: 'Weight',
-        valueText: Units.formatMaskable(e.weight),
-        onEdit: () => _editBodyweight(e),
-      ));
+      rows.add(
+        _DayRow(
+          date: e.date,
+          sortKey: e.date,
+          icon: Icons.balance,
+          label: 'Weight',
+          valueText: Units.formatMaskable(e.weight),
+          onEdit: () => _editBodyweight(e),
+        ),
+      );
     }
 
     // All soreness entries for a day collapse into one row (tag per region
@@ -678,41 +934,49 @@ class _MetricsScreenState extends State<MetricsScreen>
     }
     for (final entry in sorenessByDate.entries) {
       final date = entry.key;
-      final regions = {for (final e in entry.value) e.metricType.sorenessRegion!.label};
+      final regions = {
+        for (final e in entry.value) e.metricType.sorenessRegion!.label,
+      };
       final latestLoggedAt = entry.value
           .map((e) => e.loggedAt ?? e.date)
           .reduce((a, b) => a.compareTo(b) > 0 ? a : b);
-      rows.add(_DayRow(
-        date: date,
-        sortKey: latestLoggedAt,
-        icon: Icons.local_fire_department,
-        label: 'Soreness',
-        tags: regions.toList(),
-        onEdit: () => _editSorenessDay(date),
-      ));
+      rows.add(
+        _DayRow(
+          date: date,
+          sortKey: latestLoggedAt,
+          icon: Icons.local_fire_department,
+          label: 'Soreness',
+          tags: regions.toList(),
+          onEdit: () => _editSorenessDay(date),
+        ),
+      );
     }
 
     for (final e in _allMetrics) {
       if (e.metricType.sorenessRegion != null) {
         continue;
       } else if (e.metricType == MetricType.steps) {
-        rows.add(_DayRow(
-          date: e.date,
-          sortKey: e.loggedAt ?? e.date,
-          icon: Icons.directions_walk,
-          label: 'Steps',
-          valueText: e.value.round().toString(),
-          onEdit: () => _editSimpleMetric(SimpleMetricKind.steps, e),
-        ));
+        rows.add(
+          _DayRow(
+            date: e.date,
+            sortKey: e.loggedAt ?? e.date,
+            icon: Icons.directions_walk,
+            label: 'Steps',
+            valueText: e.value.round().toString(),
+            onEdit: () => _editSimpleMetric(SimpleMetricKind.steps, e),
+          ),
+        );
       } else if (e.metricType == MetricType.sleepHours) {
-        rows.add(_DayRow(
-          date: e.date,
-          sortKey: e.loggedAt ?? e.date,
-          icon: Icons.bed,
-          label: 'Sleep',
-          valueText: '${e.value.toStringAsFixed(1)} hrs',
-          onEdit: () => _editSimpleMetric(SimpleMetricKind.sleep, e),
-        ));
+        rows.add(
+          _DayRow(
+            date: e.date,
+            sortKey: e.loggedAt ?? e.date,
+            icon: Icons.bed,
+            label: 'Sleep',
+            valueText: '${e.value.toStringAsFixed(1)} hrs',
+            onEdit: () => _editSimpleMetric(SimpleMetricKind.sleep, e),
+          ),
+        );
       }
     }
 
@@ -720,20 +984,25 @@ class _MetricsScreenState extends State<MetricsScreen>
     // soreness — there's no shared multi-region sheet to reopen here, each
     // entry is its own independent thing to edit).
     for (final metric in _customMetrics) {
-      for (final e in _customMetricEntries[metric.id] ?? const <CustomMetricEntry>[]) {
-        rows.add(_DayRow(
-          date: e.date,
-          sortKey: e.loggedAt,
-          icon: Icons.insights,
-          label: metric.name,
-          valueText: metric.formatValue(e.value),
-          onEdit: () => _editCustomMetricEntry(metric, e),
-        ));
+      for (final e
+          in _customMetricEntries[metric.id] ?? const <CustomMetricEntry>[]) {
+        rows.add(
+          _DayRow(
+            date: e.date,
+            sortKey: e.loggedAt,
+            icon: Icons.insights,
+            label: metric.name,
+            valueText: metric.formatValue(e.value),
+            onEdit: () => _editCustomMetricEntry(metric, e),
+          ),
+        );
       }
     }
 
     if (rows.isEmpty) {
-      return Center(child: Text('No entries logged yet.', style: AppText.smallText));
+      return Center(
+        child: Text('No entries logged yet.', style: AppText.smallText),
+      );
     }
 
     final byDate = <String, List<_DayRow>>{};
@@ -748,7 +1017,8 @@ class _MetricsScreenState extends State<MetricsScreen>
         for (final date in dates) ...[
           Text(date, style: AppText.subHeader),
           const SizedBox(height: AppSpacing.standard),
-          for (final row in byDate[date]!..sort((a, b) => a.sortKey.compareTo(b.sortKey)))
+          for (final row
+              in byDate[date]!..sort((a, b) => a.sortKey.compareTo(b.sortKey)))
             Padding(
               padding: const EdgeInsets.only(bottom: AppSpacing.cardGap),
               child: AppCard(
@@ -770,11 +1040,7 @@ class _MetricsScreenState extends State<MetricsScreen>
                     if (row.valueText != null)
                       Text(row.valueText!, style: AppText.smallText),
                     const SizedBox(width: AppSpacing.standard),
-                    GestureDetector(
-                      onTap: row.onEdit,
-                      child: const Icon(Icons.edit_outlined,
-                          size: 18, color: AppColors.textSecondary),
-                    ),
+                    TapIcon(icon: Icons.edit_outlined, onTap: row.onEdit),
                   ],
                 ),
               ),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../theme/app_theme.dart';
+import 'log_cardio_form.dart';
 import 'log_lift_form.dart';
 import 'log_simple_metric_form.dart';
 import 'soreness_body_map_form.dart';
@@ -33,6 +34,7 @@ class QuickLogSheet extends StatelessWidget {
   Widget build(BuildContext context) {
     final items = <(IconData, String, Widget Function())>[
       (Icons.fitness_center, 'Lift', () => const LogLiftForm()),
+      (Icons.directions_run, 'Cardio', () => const LogCardioForm()),
       (Icons.monitor_weight_outlined, 'Weight',
           () => const LogSimpleMetricForm(kind: SimpleMetricKind.bodyweight)),
       (Icons.bedtime_outlined, 'Sleep',

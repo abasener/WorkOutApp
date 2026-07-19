@@ -37,6 +37,17 @@ class SingleGoalGauge extends StatelessWidget {
 
   final String Function(double)? formatValue;
 
+  /// When true, a *smaller* value is the achievement (e.g. pace — faster is
+  /// a lower minutes-per-mile number) instead of the default "bigger is
+  /// better." The fill/tick positions mirror across the axis so progress
+  /// still visually reads as filling left-to-right; the printed numbers
+  /// never change. See `CardioDetailScreen`'s Pace gauge.
+  final bool lowerIsBetter;
+
+  /// Label prefixing the current-value line — "True max" for lifts,
+  /// something like "Best pace" for cardio.
+  final String currentLabel;
+
   const SingleGoalGauge({
     super.key,
     required this.goals,
@@ -44,6 +55,8 @@ class SingleGoalGauge extends StatelessWidget {
     this.currentReps,
     this.predictedValue,
     this.formatValue,
+    this.lowerIsBetter = false,
+    this.currentLabel = 'True max',
   });
 
   @override
@@ -51,18 +64,40 @@ class SingleGoalGauge extends StatelessWidget {
     final format = formatValue ?? Units.format;
     final sorted = [...goals]..sort((a, b) => a.value.compareTo(b.value));
     final domainMax = sorted.last.value * 1.05;
-    // The highest goal actually reached — bolded/accented the same way
-    // StrengthGoalGauge highlights the current tier, so an old goal you've
-    // since blown past still reads as "done," not just another grey tick.
+    // The most impressive goal actually reached — bolded/accented the same
+    // way StrengthGoalGauge highlights the current tier, so an old goal
+    // you've since blown past still reads as "done," not just another grey
+    // tick. "Most impressive" is the largest value for a normal gauge, the
+    // smallest (hardest-to-hit) value when `lowerIsBetter`.
     var reachedIndex = -1;
-    for (var i = 0; i < sorted.length; i++) {
-      if (current >= sorted[i].value) reachedIndex = i;
+    if (lowerIsBetter) {
+      for (var i = sorted.length - 1; i >= 0; i--) {
+        if (current <= sorted[i].value) {
+          reachedIndex = i;
+        } else {
+          break;
+        }
+      }
+    } else {
+      for (var i = 0; i < sorted.length; i++) {
+        if (current >= sorted[i].value) {
+          reachedIndex = i;
+        } else {
+          break;
+        }
+      }
     }
 
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
-        double xOf(double v) => (v.clamp(0, domainMax) / domainMax) * width;
+        double xOf(double v) {
+          final clamped = v.clamp(0, domainMax);
+          return lowerIsBetter
+              ? ((domainMax - clamped) / domainMax) * width
+              : (clamped / domainMax) * width;
+        }
+
         const labelWidth = 56.0;
 
         Widget labelRow(String Function(GoalMarker) textOf) => SizedBox(
@@ -113,8 +148,8 @@ class SingleGoalGauge extends StatelessWidget {
             const SizedBox(height: AppSpacing.standard),
             Text(
               currentReps != null
-                  ? 'True max: ${format(current)}, $currentReps ${currentReps == 1 ? 'rep' : 'reps'}'
-                  : 'True max: ${format(current)}',
+                  ? '$currentLabel: ${format(current)}, $currentReps ${currentReps == 1 ? 'rep' : 'reps'}'
+                  : '$currentLabel: ${format(current)}',
               style: AppText.smallText,
             ),
             if (predictedValue != null) ...[

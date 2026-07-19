@@ -8,6 +8,7 @@ import '../../services/units.dart';
 import '../../services/user_profile.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/app_card.dart';
+import '../app_root.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -18,10 +19,12 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _busy = false;
-  late final _birthYearController =
-      TextEditingController(text: UserProfile.birthYear?.toString() ?? '');
-  late final _stepsGoalController =
-      TextEditingController(text: UserProfile.stepsGoal.toString());
+  late final _birthYearController = TextEditingController(
+    text: UserProfile.birthYear?.toString() ?? '',
+  );
+  late final _stepsGoalController = TextEditingController(
+    text: UserProfile.stepsGoal.toString(),
+  );
 
   @override
   void dispose() {
@@ -39,7 +42,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     // writing to the app's private documents folder and reporting a path
     // the user has no normal way to browse to on Android.
     await SharePlus.instance.share(
-      ShareParams(files: [XFile(path)], subject: 'TerpinLift export'),
+      ShareParams(files: [XFile(path)], subject: 'TerrapinLift export'),
     );
   }
 
@@ -50,14 +53,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(ok
-            ? 'Import complete.'
-            : 'No export file found — export first, or copy one into the app\'s documents folder.'),
+        content: Text(
+          ok
+              ? 'Import complete.'
+              : 'No export file found. Export first, or copy one into the app\'s documents folder.',
+        ),
       ),
     );
   }
 
-  Future<bool> _confirm({required String title, required String message}) async {
+  Future<bool> _confirm({
+    required String title,
+    required String message,
+  }) async {
     final result = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
@@ -71,7 +79,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Confirm', style: TextStyle(color: AppColors.accent)),
+            child: const Text(
+              'Confirm',
+              style: TextStyle(color: AppColors.accent),
+            ),
           ),
         ],
       ),
@@ -86,11 +97,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       title: 'Wipe data?',
       message: _inDemoMode
           ? 'This permanently deletes every logged lift, bodyweight entry, '
-              'metric, and cycle entry from the demo data set. Your personal '
-              'data is untouched. This cannot be undone.'
+                'metric, and cycle entry from the demo data set. Your personal '
+                'data is untouched. This cannot be undone.'
           : 'This permanently deletes every logged lift, bodyweight entry, '
-              'metric, and cycle entry. Your exercise list stays intact. This '
-              'cannot be undone.',
+                'metric, and cycle entry. Your exercise list stays intact. This '
+                'cannot be undone.',
     );
     if (!confirmed) return;
     setState(() => _busy = true);
@@ -98,25 +109,93 @@ class _SettingsScreenState extends State<SettingsScreen> {
     AppServices.signalReload();
     setState(() => _busy = false);
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(const SnackBar(content: Text('All logged data wiped.')));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('All logged data wiped.')));
   }
 
   Future<void> _resetDemoData() async {
     final confirmed = await _confirm(
       title: 'Reset demo data?',
-      message: 'This replaces the current demo data set with a fresh ~2 '
-          'months of made-up workout, sleep, steps, soreness, bodyweight, '
-          'and cycle history. Your personal data is untouched. This cannot '
-          'be undone.',
+      message:
+          'This clears the demo profile\'s data and settings and takes you '
+          'back through the onboarding survey. You\'ll land on an empty '
+          'demo app, same as a new install, not pre-filled with made-up '
+          'history. Load Sample Data (below) any time after if you want '
+          'that. Your personal data is a separate file and is never '
+          'touched by this.',
     );
     if (!confirmed) return;
     setState(() => _busy = true);
-    await AppServices.resetDemoData();
+    await AppServices.resetDemoDataToOnboarding();
     setState(() => _busy = false);
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(const SnackBar(content: Text('Demo data reset.')));
+    Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const AppRoot()),
+      (route) => false,
+    );
+  }
+
+  /// The hidden entry point: long-pressing the always-visible Reset Data
+  /// button prompts for a numeric code rather than doing anything to the
+  /// data itself. Typing the right one unlocks dev mode (the demo/personal
+  /// switcher and its reset/sample-data tools); anything else is just
+  /// dismissed, no feedback either way beyond the dialog closing — a normal
+  /// user long-pressing a button by accident should see nothing happen.
+  Future<void> _promptDevCode() async {
+    final controller = TextEditingController();
+    final entered = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surfaceRaised,
+        title: Text('Enter code', style: AppText.subHeader),
+        content: TextField(
+          controller: controller,
+          keyboardType: TextInputType.number,
+          autofocus: true,
+          style: AppText.bodyText,
+          onSubmitted: (v) => Navigator.pop(ctx, v),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, null),
+            child: Text('Cancel', style: AppText.bodyText),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, controller.text),
+            child: const Text(
+              'Unlock',
+              style: TextStyle(color: AppColors.accent),
+            ),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (entered == null || entered.trim() != '24') return;
+    await AppServices.setDevMode(true);
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Dev mode unlocked.')));
+  }
+
+  Future<void> _loadSampleDemoData() async {
+    final confirmed = await _confirm(
+      title: 'Load sample data?',
+      message:
+          'This replaces whatever\'s currently in the demo profile with a '
+          'fresh ~2 months of made-up workout, sleep, steps, soreness, '
+          'bodyweight, and cycle history. Your personal data is untouched.',
+    );
+    if (!confirmed) return;
+    setState(() => _busy = true);
+    await AppServices.loadSampleDemoData();
+    setState(() => _busy = false);
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Sample data loaded.')));
   }
 
   Future<void> _setProfile(AppProfile profile) async {
@@ -125,8 +204,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (switchingToDemo) {
       final confirmed = await _confirm(
         title: 'Switch to demo data?',
-        message: 'Demo mode always starts from a fresh, made-up data set — '
-            'your personal data stays exactly as it is and isn\'t shown '
+        message:
+            'Demo mode always starts from a fresh, made-up data set. '
+            'Your personal data stays exactly as it is and isn\'t shown '
             'while demo mode is on. Switch back to Personal any time to '
             'return to it.',
       );
@@ -159,9 +239,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _saveBirthYear(String text) async {
     final year = int.tryParse(text.trim());
     final currentYear = DateTime.now().year;
-    if (text.trim().isNotEmpty && (year == null || year < 1900 || year > currentYear)) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Enter a valid birth year.')));
+    if (text.trim().isNotEmpty &&
+        (year == null || year < 1900 || year > currentYear)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a valid birth year.')),
+      );
       return;
     }
     await AppServices.setBirthYear(year);
@@ -171,8 +253,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _saveStepsGoal(String text) async {
     final goal = int.tryParse(text.trim());
     if (goal == null || goal <= 0) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Enter a valid steps goal.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a valid steps goal.')),
+      );
       return;
     }
     await AppServices.setStepsGoal(goal);
@@ -187,39 +270,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(AppSpacing.edge),
         children: [
-          Text('Data set', style: AppText.subHeader),
-          const SizedBox(height: AppSpacing.standard),
-          AppCard(
-            backgroundColor: _inDemoMode ? AppColors.accentDim : null,
-            borderColor: _inDemoMode ? AppColors.accent : null,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(child: Text('Active data set', style: AppText.bodyText)),
-                    ValueListenableBuilder<AppProfile>(
-                      valueListenable: AppServices.activeProfile,
-                      builder: (context, profile, child) =>
-                          _ProfileToggle(selected: profile, onChanged: _busy ? (_) {} : _setProfile),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: AppSpacing.small),
-                Text(
-                  _inDemoMode
-                      ? 'Demo mode is on — everything you see is made-up '
-                          'data. Your personal data is untouched and comes '
-                          'back exactly as it was when you switch back.'
-                      : 'Personal is your real logged history. Switch to '
-                          'Demo any time to try things out on a disposable, '
-                          'always-fresh made-up data set instead.',
-                  style: AppText.smallText,
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: AppSpacing.large),
           Text('Profile', style: AppText.subHeader),
           const SizedBox(height: AppSpacing.standard),
           AppCard(
@@ -229,13 +279,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Row(
                   children: [
                     Expanded(child: Text('Gender', style: AppText.bodyText)),
-                    _GenderToggle(selected: UserProfile.gender, onChanged: _setGender),
+                    _GenderToggle(
+                      selected: UserProfile.gender,
+                      onChanged: _setGender,
+                    ),
                   ],
                 ),
                 const SizedBox(height: AppSpacing.standard),
                 Row(
                   children: [
-                    Expanded(child: Text('Birth year', style: AppText.bodyText)),
+                    Expanded(
+                      child: Text('Birth year', style: AppText.bodyText),
+                    ),
                     SizedBox(
                       width: 90,
                       child: TextField(
@@ -243,16 +298,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         keyboardType: TextInputType.number,
                         textAlign: TextAlign.center,
                         style: AppText.bodyText,
-                        decoration: const InputDecoration(hintText: 'e.g. 1998'),
+                        decoration: const InputDecoration(
+                          hintText: 'e.g. 1998',
+                        ),
                         onSubmitted: _saveBirthYear,
-                        onTapOutside: (_) => _saveBirthYear(_birthYearController.text),
+                        onTapOutside: (_) =>
+                            _saveBirthYear(_birthYearController.text),
                       ),
                     ),
                   ],
                 ),
                 const SizedBox(height: AppSpacing.small),
                 Text(
-                  'Used for bodyweight-ratio strength-standard goals — age and '
+                  'Used for bodyweight-ratio strength-standard goals. Age and '
                   'gender both affect realistic targets, not shown anywhere else.',
                   style: AppText.smallText,
                 ),
@@ -268,11 +326,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
               children: [
                 Row(
                   children: [
-                    Expanded(child: Text('Weight unit', style: AppText.bodyText)),
-                    _UnitToggle(
-                      selected: Units.current,
-                      onChanged: _setUnit,
+                    Expanded(
+                      child: Text('Weight unit', style: AppText.bodyText),
                     ),
+                    _UnitToggle(selected: Units.current, onChanged: _setUnit),
                   ],
                 ),
                 const SizedBox(height: AppSpacing.standard),
@@ -286,7 +343,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           const SizedBox(height: AppSpacing.micro),
                           Text(
                             'Masks your bodyweight as "---" everywhere it\'s '
-                            'displayed — trends and progress still show, just not '
+                            'displayed. Trends and progress still show, just not '
                             'the raw number. Lift weights (squat, bench, etc.) are '
                             'never affected. Entry/edit screens are unaffected.',
                             style: AppText.smallText,
@@ -320,7 +377,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     style: AppText.bodyText,
                     decoration: const InputDecoration(hintText: 'e.g. 10000'),
                     onSubmitted: _saveStepsGoal,
-                    onTapOutside: (_) => _saveStepsGoal(_stepsGoalController.text),
+                    onTapOutside: (_) =>
+                        _saveStepsGoal(_stepsGoalController.text),
                   ),
                 ),
               ],
@@ -383,13 +441,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           const SizedBox(height: AppSpacing.large),
-          Text('Development / Testing', style: AppText.subHeader),
+          Text('Reset', style: AppText.subHeader),
           const SizedBox(height: AppSpacing.standard),
           AppCard(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Wipe data', style: AppText.bodyText),
+                Text('Reset data', style: AppText.bodyText),
                 const SizedBox(height: AppSpacing.micro),
                 Text(
                   'Deletes every logged lift, bodyweight, metric, and cycle '
@@ -397,48 +455,166 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   style: AppText.smallText,
                 ),
                 const SizedBox(height: AppSpacing.standard),
-                SizedBox(
-                  height: 44,
-                  child: OutlinedButton(
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: AppColors.accent),
-                      foregroundColor: AppColors.accent,
+                // Long-pressing this button (rather than tapping it) is the
+                // hidden entry point into dev mode — see _promptDevCode.
+                // Ordinary tap behavior (the confirm dialog, then the wipe)
+                // is completely unaffected.
+                GestureDetector(
+                  onLongPress: _promptDevCode,
+                  child: SizedBox(
+                    height: 44,
+                    child: OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: AppColors.accent),
+                        foregroundColor: AppColors.accent,
+                      ),
+                      onPressed: _busy ? null : _wipeData,
+                      child: const Text('Reset Data'),
                     ),
-                    onPressed: _busy ? null : _wipeData,
-                    child: const Text('Wipe Data'),
                   ),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: AppSpacing.cardGap),
-          AppCard(
+          ValueListenableBuilder<bool>(
+            valueListenable: AppServices.devModeEnabled,
+            builder: (context, devMode, child) =>
+                devMode ? child! : const SizedBox.shrink(),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Reset demo data', style: AppText.bodyText),
-                const SizedBox(height: AppSpacing.micro),
-                Text(
-                  _inDemoMode
-                      ? 'Replaces the current demo set with a fresh ~2 '
-                          'months of made-up lift, sleep, steps, soreness, '
-                          'bodyweight, and cycle history. Your personal data '
-                          'is a separate file and is never touched by this.'
-                      : 'Switch to Demo (above) to use this — it regenerates '
-                          'a fresh made-up data set, entirely separate from '
-                          'your personal data.',
-                  style: AppText.smallText,
-                ),
+                const SizedBox(height: AppSpacing.large),
+                Text('Developer Tools', style: AppText.subHeader),
                 const SizedBox(height: AppSpacing.standard),
-                SizedBox(
-                  height: 44,
-                  child: OutlinedButton(
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: AppColors.accent),
-                      foregroundColor: AppColors.accent,
-                    ),
-                    onPressed: _busy || !_inDemoMode ? null : _resetDemoData,
-                    child: const Text('Reset Demo Data'),
+                AppCard(
+                  backgroundColor: _inDemoMode ? AppColors.accentDim : null,
+                  borderColor: _inDemoMode ? AppColors.accent : null,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Active data set',
+                              style: AppText.bodyText,
+                            ),
+                          ),
+                          ValueListenableBuilder<AppProfile>(
+                            valueListenable: AppServices.activeProfile,
+                            builder: (context, profile, child) =>
+                                _ProfileToggle(
+                                  selected: profile,
+                                  onChanged: _busy ? (_) {} : _setProfile,
+                                ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: AppSpacing.small),
+                      Text(
+                        _inDemoMode
+                            ? 'Demo mode is on. Everything you see is '
+                                  'made-up data. Your personal data is '
+                                  'untouched and comes back exactly as it '
+                                  'was when you switch back.'
+                            : 'Personal is your real logged history. '
+                                  'Switch to Demo any time to try things '
+                                  'out on a disposable, always-fresh '
+                                  'made-up data set instead.',
+                        style: AppText.smallText,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.cardGap),
+                AppCard(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Reset demo data', style: AppText.bodyText),
+                      const SizedBox(height: AppSpacing.micro),
+                      Text(
+                        _inDemoMode
+                            ? 'Reset takes you back through onboarding '
+                                  'into an empty demo app, same as a new '
+                                  'install. Load Sample Data fills it with '
+                                  'a fresh ~2 months of made-up history '
+                                  'instead, without touching onboarding. '
+                                  'Your personal data is a separate file '
+                                  'and is never touched by either.'
+                            : 'Switch to Demo (above) to use these. Both '
+                                  'are entirely separate from your '
+                                  'personal data.',
+                        style: AppText.smallText,
+                      ),
+                      const SizedBox(height: AppSpacing.standard),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: SizedBox(
+                              height: 44,
+                              child: OutlinedButton(
+                                style: OutlinedButton.styleFrom(
+                                  side: const BorderSide(
+                                    color: AppColors.accent,
+                                  ),
+                                  foregroundColor: AppColors.accent,
+                                ),
+                                onPressed: _busy || !_inDemoMode
+                                    ? null
+                                    : _resetDemoData,
+                                child: const Text('Reset Demo Data'),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: AppSpacing.small),
+                          Expanded(
+                            child: SizedBox(
+                              height: 44,
+                              child: OutlinedButton(
+                                style: OutlinedButton.styleFrom(
+                                  side: const BorderSide(
+                                    color: AppColors.border,
+                                  ),
+                                  foregroundColor: AppColors.textPrimary,
+                                ),
+                                onPressed: _busy || !_inDemoMode
+                                    ? null
+                                    : _loadSampleDemoData,
+                                child: const Text('Load Sample Data'),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.cardGap),
+                AppCard(
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Dev mode', style: AppText.bodyText),
+                            const SizedBox(height: AppSpacing.micro),
+                            Text(
+                              'Turn off to hide this section and the data '
+                              'set switcher again. Long-press Reset Data '
+                              'above (code 24) to get back in.',
+                              style: AppText.smallText,
+                            ),
+                          ],
+                        ),
+                      ),
+                      Switch(
+                        value: true,
+                        activeThumbColor: AppColors.accent,
+                        onChanged: (v) => AppServices.setDevMode(v),
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -449,9 +625,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: AppSpacing.standard),
           AppCard(
             child: Text(
-              'TerpinLift — personal strength + recovery tracker.\n'
-              'Cycle tracking is kept in a plain "Cycle" card on Metrics, '
-              'not a locked/hidden tab, in this version.',
+              UserProfile.gender == Gender.female
+                  ? 'TerrapinLift: a personal strength, cardio, and recovery '
+                        'tracker. Logs lifts, cardio, and HIIT circuits, and '
+                        'tracks steps, sleep, soreness, weight, and any '
+                        'custom metrics you set up. Everything stays on '
+                        'this device, no accounts, no cloud sync.\n'
+                        'Cycle tracking shows as a plain "Cycle" card on '
+                        'Metrics, not a locked or hidden tab.'
+                  : 'TerrapinLift: a personal strength, cardio, and recovery '
+                        'tracker. Logs lifts, cardio, and HIIT circuits, and '
+                        'tracks steps, sleep, soreness, weight, and any '
+                        'custom metrics you set up. Everything stays on '
+                        'this device, no accounts, no cloud sync.',
               style: AppText.smallText,
             ),
           ),

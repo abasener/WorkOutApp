@@ -3,7 +3,7 @@ import 'package:sqflite/sqflite.dart';
 import 'profile_manager.dart';
 
 class DatabaseHelper {
-  static const _kDbVersion = 17;
+  static const _kDbVersion = 20;
 
   /// Which data set this instance reads/writes — see `ProfileManager`.
   /// `AppServices.switchProfile` swaps in a new `DatabaseHelper` rather than
@@ -41,18 +41,32 @@ class DatabaseHelper {
   /// squat, etc.) — one entry per commonly-named lift, per the user's call.
   /// Used by both `_seedDefaults` (fresh installs) and the version-5
   /// migration (existing installs, inserted only if not already present by
-  /// name, so upgrading doesn't duplicate or touch real logged data). The
-  /// original 7 carry `'pinned': true` so the pinned-only quick-log dropdown
-  /// isn't empty by default — see the version-6 migration for how that's
-  /// backfilled onto existing installs too.
+  /// name, so upgrading doesn't duplicate or touch real logged data).
+  ///
+  /// **Default pins (redone 2026-07-21):** Back Squat, Bench Press,
+  /// Deadlift, Overhead Press, Pull Up, Push Up, Barbell Row, Run — one
+  /// compound lift per major movement pattern (squat/hinge/horizontal
+  /// push/vertical push/horizontal pull), the two original bodyweight
+  /// staples, and one cardio exercise now that cardio/HIIT exist as their
+  /// own tracked things — 8 total, so the pinned-only quick-log dropdown
+  /// isn't empty by default without being cluttered. Front Squat dropped
+  /// (redundant with Back Squat covering the same pattern). Just a
+  /// starting point — every exercise's own pin toggle still works exactly
+  /// the same, this only changes what a fresh install/demo reset starts
+  /// with. Deliberately **not** retrofitted onto an already-existing
+  /// install's current pins via a migration — that risks silently undoing
+  /// pin changes someone already made on purpose; see the version-6
+  /// migration (historical, already applied) for the one-time backfill
+  /// that originally seeded the old 7-lift default onto pre-existing
+  /// installs.
   static const _seedExercises = [
-    // --- Original 7 — pinned by default so the quick-log dropdown (which
-    // now only lists pinned exercises) isn't empty on a fresh install.
+    // --- Original 7 (redone 2026-07-21 — see below) — pinned by default so
+    // the quick-log dropdown (which only lists pinned exercises) isn't
+    // empty on a fresh install.
     {
       'name': 'Front Squat',
       'categories': 'legs,push,core',
       'equipment': 'compound',
-      'pinned': true,
       'patterns': 'squat',
     },
     {
@@ -157,6 +171,7 @@ class DatabaseHelper {
       'name': 'Barbell Row',
       'categories': 'back,pull,arms',
       'equipment': 'compound',
+      'pinned': true,
       'patterns': 'horizontalPull',
     },
     {
@@ -219,8 +234,18 @@ class DatabaseHelper {
       'equipment': 'compound',
       'patterns': 'squat',
     },
-    {'name': 'Walking Lunge', 'categories': 'legs,core', 'equipment': 'compound', 'patterns': 'squat'},
-    {'name': 'Reverse Lunge', 'categories': 'legs,core', 'equipment': 'compound', 'patterns': 'squat'},
+    {
+      'name': 'Walking Lunge',
+      'categories': 'legs,core',
+      'equipment': 'compound',
+      'patterns': 'squat',
+    },
+    {
+      'name': 'Reverse Lunge',
+      'categories': 'legs,core',
+      'equipment': 'compound',
+      'patterns': 'squat',
+    },
     {
       'name': 'Trap Bar Deadlift',
       'categories': 'back,legs,pull',
@@ -289,10 +314,26 @@ class DatabaseHelper {
       'equipment': 'isolation',
       'patterns': 'armsAesthetic',
     },
-    {'name': 'Barbell Shrug', 'categories': 'back,arms', 'equipment': 'isolation'},
-    {'name': 'Dumbbell Shrug', 'categories': 'back,arms', 'equipment': 'isolation'},
-    {'name': 'Standing Calf Raise', 'categories': 'legs', 'equipment': 'isolation'},
-    {'name': 'Seated Calf Raise', 'categories': 'legs', 'equipment': 'isolation'},
+    {
+      'name': 'Barbell Shrug',
+      'categories': 'back,arms',
+      'equipment': 'isolation',
+    },
+    {
+      'name': 'Dumbbell Shrug',
+      'categories': 'back,arms',
+      'equipment': 'isolation',
+    },
+    {
+      'name': 'Standing Calf Raise',
+      'categories': 'legs',
+      'equipment': 'isolation',
+    },
+    {
+      'name': 'Seated Calf Raise',
+      'categories': 'legs',
+      'equipment': 'isolation',
+    },
     {'name': 'Wrist Curl', 'categories': 'arms', 'equipment': 'isolation'},
 
     // --- Bodyweight ---
@@ -303,8 +344,18 @@ class DatabaseHelper {
       'patterns': 'verticalPull',
     },
     {'name': 'Dip', 'categories': 'chest,push,arms', 'equipment': 'bodyweight'},
-    {'name': 'Sit Up', 'categories': 'core', 'equipment': 'bodyweight', 'patterns': 'core'},
-    {'name': 'Crunch', 'categories': 'core', 'equipment': 'bodyweight', 'patterns': 'core'},
+    {
+      'name': 'Sit Up',
+      'categories': 'core',
+      'equipment': 'bodyweight',
+      'patterns': 'core',
+    },
+    {
+      'name': 'Crunch',
+      'categories': 'core',
+      'equipment': 'bodyweight',
+      'patterns': 'core',
+    },
     {
       'name': 'Hanging Leg Raise',
       'categories': 'core',
@@ -337,7 +388,12 @@ class DatabaseHelper {
       'equipment': 'machine',
       'patterns': 'shoulderPrehab',
     },
-    {'name': 'Leg Press', 'categories': 'legs', 'equipment': 'machine', 'patterns': 'quadGlute'},
+    {
+      'name': 'Leg Press',
+      'categories': 'legs',
+      'equipment': 'machine',
+      'patterns': 'quadGlute',
+    },
     {
       'name': 'Leg Extension',
       'categories': 'legs',
@@ -350,7 +406,12 @@ class DatabaseHelper {
       'equipment': 'machine',
       'patterns': 'hamstringGlute',
     },
-    {'name': 'Hack Squat', 'categories': 'legs,push', 'equipment': 'machine', 'patterns': 'squat'},
+    {
+      'name': 'Hack Squat',
+      'categories': 'legs,push',
+      'equipment': 'machine',
+      'patterns': 'squat',
+    },
     {
       'name': 'Smith Machine Squat',
       'categories': 'legs,push',
@@ -381,7 +442,11 @@ class DatabaseHelper {
       'equipment': 'machine',
       'patterns': 'adductorAbductor',
     },
-    {'name': 'Seated Calf Raise Machine', 'categories': 'legs', 'equipment': 'machine'},
+    {
+      'name': 'Seated Calf Raise Machine',
+      'categories': 'legs',
+      'equipment': 'machine',
+    },
     {
       'name': 'Chest Press Machine',
       'categories': 'chest,push,arms',
@@ -424,7 +489,12 @@ class DatabaseHelper {
       'equipment': 'machine',
       'patterns': 'armsAesthetic',
     },
-    {'name': 'Cable Woodchopper', 'categories': 'core', 'equipment': 'machine', 'patterns': 'core'},
+    {
+      'name': 'Cable Woodchopper',
+      'categories': 'core',
+      'equipment': 'machine',
+      'patterns': 'core',
+    },
     {
       'name': 'Cable Pull-Through',
       'categories': 'legs,core,pull',
@@ -450,17 +520,68 @@ class DatabaseHelper {
       'patterns': 'hamstringGlute',
     },
 
-    // --- Cardio ---
+    // --- Cardio ("light handling" — see designFiles/11_SCREEN_cardio.md;
+    // these are logged through cardio_sessions/cardio_entries, not
+    // lift_sessions/lift_sets, unlike Rowing Machine above them historically
+    // was) ---
     {
       'name': 'Rowing Machine',
       'categories': 'back,legs,core,pull',
       'equipment': 'cardio',
+      'cardio_unit': 'meters',
+    },
+    {
+      'name': 'Run',
+      'categories': 'legs,core',
+      'equipment': 'cardio',
+      'pinned': true,
+      'cardio_unit': 'miles',
+    },
+    {
+      'name': 'Ruck',
+      'categories': 'legs,core,back',
+      'equipment': 'cardio',
+      'cardio_unit': 'miles',
+    },
+    {
+      'name': 'Bike',
+      'categories': 'legs',
+      'equipment': 'cardio',
+      'cardio_unit': 'miles',
+    },
+    {
+      'name': 'Stairs',
+      'categories': 'legs',
+      'equipment': 'cardio',
+      'cardio_unit': 'floors',
+    },
+    {
+      'name': 'General Cardio',
+      'categories': '',
+      'equipment': 'cardio',
+      'cardio_unit': 'miles',
+    },
+    {
+      'name': 'Other Cardio',
+      'categories': '',
+      'equipment': 'cardio',
+      'cardio_unit': 'miles',
     },
 
     // --- Core, bodyweight (dynamic reps — isometric holds like planks are
     // deliberately excluded, see the v11 migration comment for why) ---
-    {'name': 'Russian Twist', 'categories': 'core', 'equipment': 'bodyweight', 'patterns': 'core'},
-    {'name': 'Dead Bug', 'categories': 'core', 'equipment': 'bodyweight', 'patterns': 'core'},
+    {
+      'name': 'Russian Twist',
+      'categories': 'core',
+      'equipment': 'bodyweight',
+      'patterns': 'core',
+    },
+    {
+      'name': 'Dead Bug',
+      'categories': 'core',
+      'equipment': 'bodyweight',
+      'patterns': 'core',
+    },
     {
       'name': 'Bicycle Crunch',
       'categories': 'core',
@@ -473,9 +594,24 @@ class DatabaseHelper {
       'equipment': 'bodyweight',
       'patterns': 'core',
     },
-    {'name': 'V-Up', 'categories': 'core', 'equipment': 'bodyweight', 'patterns': 'core'},
-    {'name': 'Leg Raise', 'categories': 'core', 'equipment': 'bodyweight', 'patterns': 'core'},
-    {'name': 'Bird Dog', 'categories': 'core,back', 'equipment': 'bodyweight', 'patterns': 'core'},
+    {
+      'name': 'V-Up',
+      'categories': 'core',
+      'equipment': 'bodyweight',
+      'patterns': 'core',
+    },
+    {
+      'name': 'Leg Raise',
+      'categories': 'core',
+      'equipment': 'bodyweight',
+      'patterns': 'core',
+    },
+    {
+      'name': 'Bird Dog',
+      'categories': 'core,back',
+      'equipment': 'bodyweight',
+      'patterns': 'core',
+    },
     {
       'name': 'Superman',
       'categories': 'back,core',
@@ -573,7 +709,8 @@ class DatabaseHelper {
         goal_source       TEXT,
         progress_metric   TEXT,
         notes             TEXT,
-        target_muscles    TEXT
+        target_muscles    TEXT,
+        cardio_unit       TEXT
       )
     ''');
 
@@ -696,13 +833,46 @@ class DatabaseHelper {
     // code, not a CHECK constraint, same style as the rest of this schema.
     await db.execute('''
       CREATE TABLE custom_goals (
-        id            INTEGER PRIMARY KEY AUTOINCREMENT,
-        exercise_id   INTEGER NOT NULL,
-        label         TEXT,
-        target_weight REAL,
-        target_reps   INTEGER,
-        created       TEXT    NOT NULL,
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        exercise_id    INTEGER NOT NULL,
+        label          TEXT,
+        target_weight  REAL,
+        target_reps    INTEGER,
+        target_distance REAL,
+        target_pace    REAL,
+        created        TEXT    NOT NULL,
         FOREIGN KEY (exercise_id) REFERENCES exercises (id) ON DELETE CASCADE
+      )
+    ''');
+
+    // Cardio (Ruck/Run/Bike/Rowing/Stairs/general — "light handling," not a
+    // full cardio-training feature) gets its own session/entry pair rather
+    // than being forced through lift_sessions/lift_sets' reps+weight shape —
+    // see designFiles/11_SCREEN_cardio.md. Same session-then-entries shape
+    // as lift_sessions/lift_sets; entry_number lets a session log more than
+    // one effort (interval-style cardio) even though most days it's just one.
+    await db.execute('''
+      CREATE TABLE cardio_sessions (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        exercise_id INTEGER NOT NULL,
+        date        TEXT    NOT NULL,
+        notes       TEXT,
+        FOREIGN KEY (exercise_id) REFERENCES exercises (id) ON DELETE CASCADE
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE cardio_entries (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id        INTEGER NOT NULL,
+        entry_number      INTEGER NOT NULL,
+        distance_canonical REAL,
+        duration_seconds  INTEGER,
+        load              REAL,
+        rpe               REAL,
+        entry_started_at  TEXT,
+        entry_completed_at TEXT,
+        FOREIGN KEY (session_id) REFERENCES cardio_sessions (id) ON DELETE CASCADE
       )
     ''');
 
@@ -766,6 +936,61 @@ class DatabaseHelper {
       )
     ''');
 
+    // HIIT (designFiles/12_SCREEN_hiit.md) — a routine is a flat, strictly-
+    // ordered sequence of `hiit_slots` (sequence_index), grouped into rounds
+    // (group_index) purely for the progress bar's round markers and for
+    // knowing where a round's rest goes. `hiit_sessions` also carries live
+    // resume state (current_sequence_index/current_phase/phase_started_at/
+    // phase_remaining_seconds/current_reps_remaining/paused) so leaving the
+    // active-session screen (Pause, or just navigating away) and coming back
+    // later through the Home widget picks up exactly where it left off.
+    await db.execute('''
+      CREATE TABLE hiit_sessions (
+        id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+        date                    TEXT    NOT NULL,
+        notes                   TEXT,
+        started_at              TEXT    NOT NULL,
+        completed_at            TEXT,
+        status                  TEXT    NOT NULL,
+        automatic               INTEGER NOT NULL DEFAULT 1,
+        current_sequence_index  INTEGER NOT NULL DEFAULT 0,
+        current_phase           TEXT    NOT NULL DEFAULT 'work',
+        phase_started_at        TEXT,
+        phase_remaining_seconds REAL,
+        current_reps_remaining  INTEGER,
+        paused                  INTEGER NOT NULL DEFAULT 0,
+        total_paused_seconds    REAL    NOT NULL DEFAULT 0
+      )
+    ''');
+
+    // No FK on exercise_id/lift_set_id/cardio_entry_id on purpose — a HIIT
+    // slot references whatever exercise was picked at setup time, and the
+    // set/entry it eventually produces is written well after the slot row
+    // already exists (see `HiitService.saveSession`), so a strict FK would
+    // just add ordering constraints with no real safety benefit here.
+    await db.execute('''
+      CREATE TABLE hiit_slots (
+        id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+        hiit_session_id     INTEGER NOT NULL,
+        sequence_index      INTEGER NOT NULL,
+        group_index         INTEGER NOT NULL,
+        exercise_id         INTEGER NOT NULL,
+        exercise_kind       TEXT    NOT NULL,
+        target_type         TEXT    NOT NULL,
+        target_value        REAL,
+        weight              REAL,
+        rest_after_seconds  INTEGER,
+        actual_reps         INTEGER,
+        actual_weight       REAL,
+        actual_time_seconds INTEGER,
+        actual_distance     REAL,
+        actual_load         REAL,
+        lift_set_id         INTEGER,
+        cardio_entry_id     INTEGER,
+        FOREIGN KEY (hiit_session_id) REFERENCES hiit_sessions (id) ON DELETE CASCADE
+      )
+    ''');
+
     await _seedDefaults(db);
     await _seedDefaultWorkoutTemplate(db);
   }
@@ -789,7 +1014,9 @@ class DatabaseHelper {
       case 3:
         await db.execute('ALTER TABLE metrics_log ADD COLUMN logged_at TEXT');
       case 4:
-        await db.execute('ALTER TABLE exercises ADD COLUMN equipment_tags TEXT');
+        await db.execute(
+          'ALTER TABLE exercises ADD COLUMN equipment_tags TEXT',
+        );
       case 5:
         // Backfills the bulk exercise-library round for installs that
         // already have real logged data (so it doesn't require wiping to
@@ -797,9 +1024,10 @@ class DatabaseHelper {
         // since a fresh install already got the full list via
         // `_seedDefaults` and this migration still runs once on top of that
         // if the DB was created at a version before 5.
-        final existing = (await db.query('exercises', columns: ['name']))
-            .map((r) => r['name'] as String)
-            .toSet();
+        final existing = (await db.query(
+          'exercises',
+          columns: ['name'],
+        )).map((r) => r['name'] as String).toSet();
         final today = DateTime.now().toIso8601String().substring(0, 10);
         for (final e in _seedExercises) {
           if (existing.contains(e['name'])) continue;
@@ -815,13 +1043,19 @@ class DatabaseHelper {
         }
       case 6:
         await db.execute(
-            'ALTER TABLE exercises ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0');
+          'ALTER TABLE exercises ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0',
+        );
         // Pre-pin the original 7 for existing installs, matching the
         // fresh-install default — otherwise the new pinned-only quick-log
         // dropdown would come up empty for anyone upgrading.
         for (final e in _seedExercises) {
           if (e['pinned'] != true) continue;
-          await db.update('exercises', {'pinned': 1}, where: 'name = ?', whereArgs: [e['name']]);
+          await db.update(
+            'exercises',
+            {'pinned': 1},
+            where: 'name = ?',
+            whereArgs: [e['name']],
+          );
         }
       case 7:
         // Soreness sub-splitting (designFiles/05_SCREEN_metrics.md): the 5
@@ -858,10 +1092,13 @@ class DatabaseHelper {
         // round (Trap Bar Deadlift, Landmine Press, Cable Pull-Through,
         // Pallof Press, Straight-Arm Cable Pulldown, Glute Bridge Machine)
         // for anyone upgrading rather than starting fresh.
-        await db.execute('ALTER TABLE exercises ADD COLUMN movement_patterns TEXT');
-        final existingNames = (await db.query('exercises', columns: ['name']))
-            .map((r) => r['name'] as String)
-            .toSet();
+        await db.execute(
+          'ALTER TABLE exercises ADD COLUMN movement_patterns TEXT',
+        );
+        final existingNames = (await db.query(
+          'exercises',
+          columns: ['name'],
+        )).map((r) => r['name'] as String).toSet();
         final todayV8 = DateTime.now().toIso8601String().substring(0, 10);
         for (final e in _seedExercises) {
           if (existingNames.contains(e['name'])) {
@@ -959,9 +1196,10 @@ class DatabaseHelper {
         // Machine, Low Row Machine. Insert-only-if-missing, same pattern as
         // the v5/v8 backfills — anyone already on this exercise list from a
         // fresh v11+ install isn't touched.
-        final existingNamesV11 = (await db.query('exercises', columns: ['name']))
-            .map((r) => r['name'] as String)
-            .toSet();
+        final existingNamesV11 = (await db.query(
+          'exercises',
+          columns: ['name'],
+        )).map((r) => r['name'] as String).toSet();
         final todayV11 = DateTime.now().toIso8601String().substring(0, 10);
         const newInV11 = {
           'Russian Twist',
@@ -982,7 +1220,10 @@ class DatabaseHelper {
           'Low Row Machine',
         };
         for (final e in _seedExercises) {
-          if (!newInV11.contains(e['name']) || existingNamesV11.contains(e['name'])) continue;
+          if (!newInV11.contains(e['name']) ||
+              existingNamesV11.contains(e['name'])) {
+            continue;
+          }
           await db.insert('exercises', {
             'name': e['name'],
             'category': e['categories'],
@@ -1002,7 +1243,9 @@ class DatabaseHelper {
         // standard, and lets True Max vs. Predicted 1RM be picked per lift
         // rather than one global rule.
         await db.execute('ALTER TABLE exercises ADD COLUMN goal_source TEXT');
-        await db.execute('ALTER TABLE exercises ADD COLUMN progress_metric TEXT');
+        await db.execute(
+          'ALTER TABLE exercises ADD COLUMN progress_metric TEXT',
+        );
         await db.execute('''
           CREATE TABLE custom_goals (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1037,7 +1280,9 @@ class DatabaseHelper {
         // now record their own fine-grained target muscles instead of only
         // falling back to a broad category-based guess.
         await db.execute('ALTER TABLE exercises ADD COLUMN notes TEXT');
-        await db.execute('ALTER TABLE exercises ADD COLUMN target_muscles TEXT');
+        await db.execute(
+          'ALTER TABLE exercises ADD COLUMN target_muscles TEXT',
+        );
       case 15:
         // Progress photos (a date-stamped image log) and the metric builder
         // (unlimited user-defined metrics — number/scale/classes kinds) —
@@ -1091,6 +1336,144 @@ class DatabaseHelper {
             last_checked_date TEXT
           )
         ''');
+      case 18:
+        // Cardio backend — see designFiles/11_SCREEN_cardio.md.
+        await db.execute(
+          'ALTER TABLE custom_goals ADD COLUMN target_distance REAL',
+        );
+        await db.execute(
+          'ALTER TABLE custom_goals ADD COLUMN target_speed REAL',
+        );
+        await db.execute('''
+          CREATE TABLE cardio_sessions (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            exercise_id INTEGER NOT NULL,
+            date        TEXT    NOT NULL,
+            notes       TEXT,
+            FOREIGN KEY (exercise_id) REFERENCES exercises (id) ON DELETE CASCADE
+          )
+        ''');
+        await db.execute('''
+          CREATE TABLE cardio_entries (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id        INTEGER NOT NULL,
+            entry_number      INTEGER NOT NULL,
+            distance_miles    REAL,
+            duration_seconds  INTEGER,
+            load              REAL,
+            rpe               REAL,
+            entry_started_at  TEXT,
+            entry_completed_at TEXT,
+            FOREIGN KEY (session_id) REFERENCES cardio_sessions (id) ON DELETE CASCADE
+          )
+        ''');
+        // Backfill the new cardio exercises for existing installs — same
+        // "only insert names not already present" pattern as the v5 bulk-
+        // library backfill, since a fresh install already got these via
+        // `_seedDefaults`.
+        final existing = (await db.query(
+          'exercises',
+          columns: ['name'],
+        )).map((r) => r['name'] as String).toSet();
+        final today = DateTime.now().toIso8601String().substring(0, 10);
+        for (final e in _seedExercises) {
+          final name = e['name'] as String;
+          if (!{
+            'Run',
+            'Ruck',
+            'Bike',
+            'Stairs',
+            'General Cardio',
+            'Other Cardio',
+          }.contains(name)) {
+            continue;
+          }
+          if (existing.contains(name)) continue;
+          await db.insert('exercises', {
+            'name': name,
+            'category': e['categories'],
+            'equipment_tags': e['equipment'],
+            'is_seeded': 1,
+            'youtube_url': null,
+            'created': today,
+            'pinned': 0,
+          });
+        }
+      case 19:
+        // Cardio revisions from on-device feedback the same week: per-
+        // exercise distance units (a run tracked in miles, a row in meters)
+        // instead of the app-wide lb/kg toggle, and pace (min/mile) instead
+        // of speed (mph) for the goal gauge — see
+        // designFiles/11_SCREEN_cardio.md. `exercises.cardio_unit` didn't
+        // exist when v18 first shipped `cardio_entries`/the speed goal
+        // column, so this both adds it and renames the two v18 columns to
+        // their final names.
+        await db.execute('ALTER TABLE exercises ADD COLUMN cardio_unit TEXT');
+        await db.execute(
+          'ALTER TABLE cardio_entries RENAME COLUMN distance_miles TO distance_canonical',
+        );
+        await db.execute(
+          'ALTER TABLE custom_goals RENAME COLUMN target_speed TO target_pace',
+        );
+        const cardioUnitsByName = {
+          'Rowing Machine': 'meters',
+          'Run': 'miles',
+          'Ruck': 'miles',
+          'Bike': 'miles',
+          'Stairs': 'floors',
+          'General Cardio': 'miles',
+          'Other Cardio': 'miles',
+        };
+        for (final entry in cardioUnitsByName.entries) {
+          await db.update(
+            'exercises',
+            {'cardio_unit': entry.value},
+            where: 'name = ?',
+            whereArgs: [entry.key],
+          );
+        }
+      case 20:
+        // HIIT — see designFiles/12_SCREEN_hiit.md.
+        await db.execute('''
+          CREATE TABLE hiit_sessions (
+            id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+            date                    TEXT    NOT NULL,
+            notes                   TEXT,
+            started_at              TEXT    NOT NULL,
+            completed_at            TEXT,
+            status                  TEXT    NOT NULL,
+            automatic               INTEGER NOT NULL DEFAULT 1,
+            current_sequence_index  INTEGER NOT NULL DEFAULT 0,
+            current_phase           TEXT    NOT NULL DEFAULT 'work',
+            phase_started_at        TEXT,
+            phase_remaining_seconds REAL,
+            current_reps_remaining  INTEGER,
+            paused                  INTEGER NOT NULL DEFAULT 0,
+            total_paused_seconds    REAL    NOT NULL DEFAULT 0
+          )
+        ''');
+        await db.execute('''
+          CREATE TABLE hiit_slots (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            hiit_session_id     INTEGER NOT NULL,
+            sequence_index      INTEGER NOT NULL,
+            group_index         INTEGER NOT NULL,
+            exercise_id         INTEGER NOT NULL,
+            exercise_kind       TEXT    NOT NULL,
+            target_type         TEXT    NOT NULL,
+            target_value        REAL,
+            weight              REAL,
+            rest_after_seconds  INTEGER,
+            actual_reps         INTEGER,
+            actual_weight       REAL,
+            actual_time_seconds INTEGER,
+            actual_distance     REAL,
+            actual_load         REAL,
+            lift_set_id         INTEGER,
+            cardio_entry_id     INTEGER,
+            FOREIGN KEY (hiit_session_id) REFERENCES hiit_sessions (id) ON DELETE CASCADE
+          )
+        ''');
     }
   }
 
@@ -1124,13 +1507,16 @@ class DatabaseHelper {
         'youtube_url': null,
         'created': today,
         'pinned': (e['pinned'] as bool? ?? false) ? 1 : 0,
+        'cardio_unit': e['cardio_unit'],
       });
     }
   }
 
-  /// Clears all logged entries (sets, sessions, bodyweight, metrics, cycle)
-  /// but leaves the exercise list (seeded + custom) and settings untouched —
-  /// this is "wipe my data," not "reset my app setup."
+  /// Clears all logged entries (lift/cardio/HIIT sets and sessions,
+  /// bodyweight, metrics, cycle) but leaves the exercise list (seeded +
+  /// custom) and settings untouched — this is "wipe my data," not "reset my
+  /// app setup." Deleting `cardio_sessions`/`hiit_sessions` cascades to
+  /// `cardio_entries`/`hiit_slots` (`PRAGMA foreign_keys = ON`).
   Future<void> wipeLoggedData() async {
     final db = await database;
     await db.delete('lift_sets');
@@ -1138,12 +1524,19 @@ class DatabaseHelper {
     await db.delete('bodyweight_log');
     await db.delete('metrics_log');
     await db.delete('cycle_log');
+    await db.delete('cardio_sessions');
+    await db.delete('hiit_sessions');
   }
 
   /// Full reset used before loading synthetic test data: clears everything
   /// including exercises, then reseeds the full default exercise library so test-data
   /// generation has a known, deterministic exercise list to work from.
-  /// Settings (e.g. unit preference) are left alone.
+  /// Settings (e.g. unit preference) are left alone. Deleting
+  /// `cardio_sessions`/`hiit_sessions` also cascades to `cardio_entries`/
+  /// `hiit_slots` (`PRAGMA foreign_keys = ON`, set in `onOpen`) — without
+  /// this, repeated demo resets left old cardio/HIIT rows behind pointing at
+  /// exercise ids that no longer existed after the reseed, silently
+  /// accumulating orphaned rows every time "Reset Demo Data" ran.
   Future<void> wipeEverythingAndReseed() async {
     final db = await database;
     await db.delete('lift_sets');
@@ -1151,7 +1544,34 @@ class DatabaseHelper {
     await db.delete('bodyweight_log');
     await db.delete('metrics_log');
     await db.delete('cycle_log');
+    await db.delete('cardio_sessions');
+    await db.delete('hiit_sessions');
     await db.delete('exercises');
     await _seedDefaults(db);
+  }
+
+  /// Read-only check used to decide whether a profile that predates the
+  /// onboarding flag is a genuinely fresh install (show onboarding) or an
+  /// already-in-use profile that just never had the flag written (grandfather
+  /// it in as already onboarded, without ever showing the survey
+  /// retroactively). Never writes anything itself.
+  Future<bool> hasAnyPriorActivity() async {
+    final db = await database;
+    Future<int> count(String table, {String? where}) async {
+      final rows = await db.rawQuery(
+        'SELECT COUNT(*) AS c FROM $table${where == null ? '' : ' WHERE $where'}',
+      );
+      return (rows.first['c'] as int?) ?? 0;
+    }
+
+    if (await count('app_settings') > 0) return true;
+    if (await count('lift_sessions') > 0) return true;
+    if (await count('bodyweight_log') > 0) return true;
+    if (await count('metrics_log') > 0) return true;
+    if (await count('cycle_log') > 0) return true;
+    if (await count('cardio_sessions') > 0) return true;
+    if (await count('hiit_sessions') > 0) return true;
+    if (await count('exercises', where: 'is_seeded = 0') > 0) return true;
+    return false;
   }
 }

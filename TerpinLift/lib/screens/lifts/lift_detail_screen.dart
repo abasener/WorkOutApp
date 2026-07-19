@@ -23,6 +23,7 @@ import '../../widgets/range_indicator.dart';
 import '../../widgets/readiness_segmented_bar.dart';
 import '../../widgets/single_goal_gauge.dart';
 import '../../widgets/strength_goal_gauge.dart';
+import '../../widgets/tap_icon.dart';
 import '../quick_log/log_lift_form.dart';
 import 'add_exercise_sheet.dart';
 import 'custom_goal_history_sheet.dart';
@@ -58,14 +59,17 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
   }
 
   Future<void> _load() async {
-    final sessions =
-        await AppServices.lifts.getSessionsForExercise(widget.exercise.id!);
+    final sessions = await AppServices.lifts.getSessionsForExercise(
+      widget.exercise.id!,
+    );
     // Re-fetch the exercise itself too, so edits (name/categories/YT link)
     // show up here immediately without needing to re-navigate.
     final exercise = await AppServices.exercises.getById(widget.exercise.id!);
     final muscleReadiness = await ReadinessEngine.computeMuscleReadiness();
     final latestBodyweight = await AppServices.bodyweight.getLatest();
-    final customGoals = await AppServices.customGoals.getAllForExercise(widget.exercise.id!);
+    final customGoals = await AppServices.customGoals.getAllForExercise(
+      widget.exercise.id!,
+    );
     if (!mounted) return;
     setState(() {
       _sessions = sessions;
@@ -84,8 +88,12 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
-          color: selected ? AppColors.accent.withValues(alpha: 0.15) : AppColors.surfaceRaised,
-          border: Border.all(color: selected ? AppColors.accent : AppColors.border),
+          color: selected
+              ? AppColors.accent.withValues(alpha: 0.15)
+              : AppColors.surfaceRaised,
+          border: Border.all(
+            color: selected ? AppColors.accent : AppColors.border,
+          ),
           borderRadius: BorderRadius.circular(AppRadius.pill),
         ),
         child: Text(
@@ -115,11 +123,15 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => Padding(
-        padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom,
+        ),
         child: Container(
           decoration: const BoxDecoration(
             color: AppColors.surfaceRaised,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.card)),
+            borderRadius: BorderRadius.vertical(
+              top: Radius.circular(AppRadius.card),
+            ),
           ),
           padding: EdgeInsets.fromLTRB(
             AppSpacing.edge,
@@ -139,7 +151,9 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
                 maxLines: 6,
                 minLines: 3,
                 autofocus: true,
-                decoration: const InputDecoration(hintText: 'Form cues, reminders, whatever helps.'),
+                decoration: const InputDecoration(
+                  hintText: 'Form cues, reminders, whatever helps.',
+                ),
               ),
               const SizedBox(height: AppSpacing.large),
               SizedBox(
@@ -150,7 +164,8 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
                     backgroundColor: AppColors.accent,
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(AppRadius.button)),
+                      borderRadius: BorderRadius.circular(AppRadius.button),
+                    ),
                   ),
                   onPressed: () => Navigator.pop(context, true),
                   child: const Text('Save'),
@@ -218,12 +233,15 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => EditLiftSessionForm(exercise: _exercise, sessionWithSets: session),
+      builder: (_) =>
+          EditLiftSessionForm(exercise: _exercise, sessionWithSets: session),
     );
   }
 
-  static const _compactPadding =
-      EdgeInsets.symmetric(horizontal: AppSpacing.cardPad, vertical: AppSpacing.standard);
+  static const _compactPadding = EdgeInsets.symmetric(
+    horizontal: AppSpacing.cardPad,
+    vertical: AppSpacing.standard,
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -240,19 +258,26 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
     // load) wherever "e1RM" is computed, and the Goal gauge switches to a
     // rep-count standards table instead of a bodyweight-ratio one. See
     // designFiles/07_SMART_TRENDS.md.
-    final isBodyweightLift = _exercise.equipmentTags.contains(ExerciseType.bodyweight);
+    final isBodyweightLift = _exercise.equipmentTags.contains(
+      ExerciseType.bodyweight,
+    );
     final useBodyweightE1rm = isBodyweightLift && _bodyweightLb != null;
-    double e1rmValueOf(SessionWithSets s) =>
-        useBodyweightE1rm ? s.bodyweightAdjustedBestE1rm(_bodyweightLb!) : s.bestE1rm;
-    double Function(LiftSet)? repLoadOf =
-        useBodyweightE1rm ? (set) => _bodyweightLb! + set.weight : null;
+    double e1rmValueOf(SessionWithSets s) => useBodyweightE1rm
+        ? s.bodyweightAdjustedBestE1rm(_bodyweightLb!)
+        : s.bestE1rm;
+    double Function(LiftSet)? repLoadOf = useBodyweightE1rm
+        ? (set) => _bodyweightLb! + set.weight
+        : null;
 
     // "Next Heavy Set" — what to aim for at the rep count this lift is
     // usually gone heavy at, projected from recent history at that same rep
     // count (see `TrendEngine.predictNextAtCharacteristicReps`; no rep-to-1RM
     // conversion involved, so no formula to get wrong the way the old e1RM
     // range did on a near-failure multi-rep set).
-    final nextHeavySet = TrendEngine.predictNextAtCharacteristicReps(_sessions, loadOf: repLoadOf);
+    final nextHeavySet = TrendEngine.predictNextAtCharacteristicReps(
+      _sessions,
+      loadOf: repLoadOf,
+    );
 
     // Trend chart: each session's literal heaviest-set weight (bodyweight-
     // adjusted where relevant) — never a formula estimate — with the rep
@@ -260,29 +285,38 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
     // by e1RM (comparable across differing rep counts) but re-centered onto
     // this raw-weight scale. Full history — no 6-month cap, unlike the
     // Home/Metrics dashboards.
-    final strengthPoints = _sessions.reversed.where((s) => s.sets.isNotEmpty).map((s) {
-      double load(LiftSet set) => useBodyweightE1rm ? _bodyweightLb! + set.weight : set.weight;
-      final heaviest = s.sets.reduce((a, b) => load(a) >= load(b) ? a : b);
-      return ChartPoint(
-        DateTime.parse(s.session.date),
-        load(heaviest),
-        reps: heaviest.reps,
-        trendValue: e1rmValueOf(s),
-      );
-    }).where((p) => p.value > 0).toList();
+    final strengthPoints = _sessions.reversed
+        .where((s) => s.sets.isNotEmpty)
+        .map((s) {
+          double load(LiftSet set) =>
+              useBodyweightE1rm ? _bodyweightLb! + set.weight : set.weight;
+          final heaviest = s.sets.reduce((a, b) => load(a) >= load(b) ? a : b);
+          return ChartPoint(
+            DateTime.parse(s.session.date),
+            load(heaviest),
+            reps: heaviest.reps,
+            trendValue: e1rmValueOf(s),
+          );
+        })
+        .where((p) => p.value > 0)
+        .toList();
 
     final daysSince = TrendEngine.daysSinceLastTrained(_sessions);
     final intensity = TrendEngine.lastIntensity(_sessions);
     final musclesHit = MuscleMap.musclesFor(_exercise);
-    final muscleData = {for (final m in musclesHit) m: const MuscleData(intensity: 1.0)};
+    final muscleData = {
+      for (final m in musclesHit) m: const MuscleData(intensity: 1.0),
+    };
     final readinessBars = ReadinessEngine.toBars(
-        ReadinessEngine.readinessForExercise(_exercise, _muscleReadiness));
+      ReadinessEngine.readinessForExercise(_exercise, _muscleReadiness),
+    );
 
     // Goal gauge's "Predicted 1RM" line — most-recent-history only, no decay
     // (see `TrendEngine.predictedOneRepMax`). Not a meaningful concept for
     // the bodyweight-reps variant of this gauge.
-    final predicted1Rm =
-        isBodyweightLift ? null : TrendEngine.predictedOneRepMax(_sessions, gender: UserProfile.gender);
+    final predicted1Rm = isBodyweightLift
+        ? null
+        : TrendEngine.predictedOneRepMax(_sessions, gender: UserProfile.gender);
 
     // The gauge's actual fill/tier position: the heaviest weight literally
     // logged on any set, ever — never Epley-projected, never decayed (a PR
@@ -291,7 +325,9 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
     LiftSet? trueMaxSet;
     for (final s in _sessions) {
       for (final set in s.sets) {
-        if (trueMaxSet == null || set.weight > trueMaxSet.weight) trueMaxSet = set;
+        if (trueMaxSet == null || set.weight > trueMaxSet.weight) {
+          trueMaxSet = set;
+        }
       }
     }
     final trueMaxWeight = trueMaxSet?.weight;
@@ -299,19 +335,20 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
 
     final standardTierTargets =
         (_bodyweightLb != null && StrengthStandards.hasStandard(_exercise.name))
-            ? StrengthStandards.allTargets(
-                exerciseName: _exercise.name,
-                bodyweightLb: _bodyweightLb!,
-                gender: UserProfile.gender,
-                ageBucket: UserProfile.ageBucket,
-              )
-            : null;
+        ? StrengthStandards.allTargets(
+            exerciseName: _exercise.name,
+            bodyweightLb: _bodyweightLb!,
+            gender: UserProfile.gender,
+            ageBucket: UserProfile.ageBucket,
+          )
+        : null;
 
     // Goal gauge's rep-count side: pinned to plain-bodyweight sets only
     // (added load == 0), since published pull-up/push-up standards assume
     // unassisted, unweighted reps — a weighted or assisted PR isn't
     // comparable to that table.
-    final repStandardTargets = BodyweightRepStandards.hasStandard(_exercise.name)
+    final repStandardTargets =
+        BodyweightRepStandards.hasStandard(_exercise.name)
         ? BodyweightRepStandards.allTargets(
             exerciseName: _exercise.name,
             gender: UserProfile.gender,
@@ -321,12 +358,18 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
     int bestBodyweightReps = 0;
     for (final s in _sessions) {
       for (final set in s.sets) {
-        if (set.weight == 0 && set.reps > bestBodyweightReps) bestBodyweightReps = set.reps;
+        if (set.weight == 0 && set.reps > bestBodyweightReps) {
+          bestBodyweightReps = set.reps;
+        }
       }
     }
-    final prBestReps = bestBodyweightReps == 0 ? null : bestBodyweightReps.toDouble();
+    final prBestReps = bestBodyweightReps == 0
+        ? null
+        : bestBodyweightReps.toDouble();
 
-    final goalStandardTierTargets = isBodyweightLift ? repStandardTargets : standardTierTargets;
+    final goalStandardTierTargets = isBodyweightLift
+        ? repStandardTargets
+        : standardTierTargets;
     final goalCurrentValue = isBodyweightLift ? prBestReps : trueMaxWeight;
     final goalPredictedValue = isBodyweightLift ? null : predicted1Rm;
     String Function(double)? goalFormatValue;
@@ -341,20 +384,34 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
     // disappearing the moment a new one is added.
     final latestCustomGoal = _customGoals.isEmpty ? null : _customGoals.first;
     final customGoalMarkers = _customGoals
-        .where((g) => isBodyweightLift ? g.targetReps != null : g.targetWeight != null)
-        .map((g) => GoalMarker(
-              value: isBodyweightLift ? g.targetReps!.toDouble() : g.targetWeight!,
-              label: g.label?.isNotEmpty == true ? g.label! : g.created.substring(0, 10),
-            ))
+        .where(
+          (g) =>
+              isBodyweightLift ? g.targetReps != null : g.targetWeight != null,
+        )
+        .map(
+          (g) => GoalMarker(
+            value: isBodyweightLift
+                ? g.targetReps!.toDouble()
+                : g.targetWeight!,
+            label: g.label?.isNotEmpty == true
+                ? g.label!
+                : g.created.substring(0, 10),
+          ),
+        )
         .toList();
-    final hasStandardGoal = goalStandardTierTargets != null && goalCurrentValue != null;
-    final hasCustomGoal = goalCurrentValue != null &&
+    final hasStandardGoal =
+        goalStandardTierTargets != null && goalCurrentValue != null;
+    final hasCustomGoal =
+        goalCurrentValue != null &&
         latestCustomGoal != null &&
         (isBodyweightLift
             ? latestCustomGoal.targetReps != null
             : latestCustomGoal.targetWeight != null);
-    var effectiveGoalSource = _exercise.goalSource ??
-        (hasStandardGoal ? GoalSource.standard : (hasCustomGoal ? GoalSource.custom : null));
+    var effectiveGoalSource =
+        _exercise.goalSource ??
+        (hasStandardGoal
+            ? GoalSource.standard
+            : (hasCustomGoal ? GoalSource.custom : null));
     if (effectiveGoalSource == GoalSource.standard && !hasStandardGoal) {
       effectiveGoalSource = hasCustomGoal ? GoalSource.custom : null;
     }
@@ -368,9 +425,13 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
         title: Text(_exercise.name),
         actions: [
           IconButton(
-            icon: Icon(_exercise.pinned ? Icons.push_pin : Icons.push_pin_outlined),
+            icon: Icon(
+              _exercise.pinned ? Icons.push_pin : Icons.push_pin_outlined,
+            ),
             color: _exercise.pinned ? AppColors.accent : null,
-            tooltip: _exercise.pinned ? 'Unpin' : 'Pin — shows in the quick-log dropdown',
+            tooltip: _exercise.pinned
+                ? 'Unpin'
+                : 'Pin (shows in the quick-log dropdown)',
             onPressed: _togglePinned,
           ),
           IconButton(
@@ -403,8 +464,8 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
                         daysSince == null
                             ? '—'
                             : daysSince == 0
-                                ? 'Today'
-                                : '$daysSince ${daysSince == 1 ? 'day' : 'days'} ago',
+                            ? 'Today'
+                            : '$daysSince ${daysSince == 1 ? 'day' : 'days'} ago',
                         style: AppText.subHeader,
                       ),
                     ],
@@ -436,7 +497,10 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Text('Readiness', style: AppText.label),
-                          const InfoTooltip(glossaryKey: 'readiness', title: 'Readiness'),
+                          const InfoTooltip(
+                            glossaryKey: 'readiness',
+                            title: 'Readiness',
+                          ),
                         ],
                       ),
                       const SizedBox(height: AppSpacing.small),
@@ -457,13 +521,16 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
                   Row(
                     children: [
                       Text('Next Heavy Set', style: AppText.label),
-                      const InfoTooltip(glossaryKey: 'next_heavy_set', title: 'Next Heavy Set'),
+                      const InfoTooltip(
+                        glossaryKey: 'next_heavy_set',
+                        title: 'Next Heavy Set',
+                      ),
                     ],
                   ),
                   const SizedBox(height: AppSpacing.micro),
                   Text(
                     'You tend to go heavy for ${nextHeavySet.reps} '
-                    '${nextHeavySet.reps == 1 ? 'rep' : 'reps'} — here\'s a target for next time.',
+                    '${nextHeavySet.reps == 1 ? 'rep' : 'reps'}. Here\'s a target for next time.',
                     style: AppText.smallText,
                   ),
                   const SizedBox(height: AppSpacing.standard),
@@ -493,7 +560,10 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
                               child: BodyHeatmap(
                                 side: BodySide.front,
                                 data: muscleData,
-                                colors: const [AppColors.muscleHigh, AppColors.muscleHigh],
+                                colors: const [
+                                  AppColors.muscleHigh,
+                                  AppColors.muscleHigh,
+                                ],
                                 bodyColor: AppColors.surfaceRaised,
                                 borderColor: AppColors.textSecondary,
                                 showBorder: true,
@@ -506,7 +576,10 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
                               child: BodyHeatmap(
                                 side: BodySide.back,
                                 data: muscleData,
-                                colors: const [AppColors.muscleHigh, AppColors.muscleHigh],
+                                colors: const [
+                                  AppColors.muscleHigh,
+                                  AppColors.muscleHigh,
+                                ],
                                 bodyColor: AppColors.surfaceRaised,
                                 borderColor: AppColors.textSecondary,
                                 showBorder: true,
@@ -517,7 +590,8 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
                       ),
                     ),
                   ),
-                if (musclesHit.isNotEmpty) const SizedBox(width: AppSpacing.standard),
+                if (musclesHit.isNotEmpty)
+                  const SizedBox(width: AppSpacing.standard),
                 Expanded(
                   child: AppCard(
                     child: Column(
@@ -528,10 +602,10 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
                           children: [
                             Text('Notes', style: AppText.label),
                             const Spacer(),
-                            GestureDetector(
+                            TapIcon(
+                              icon: Icons.edit_outlined,
+                              size: 16,
                               onTap: _editNotes,
-                              child: const Icon(Icons.edit_outlined,
-                                  size: 16, color: AppColors.textSecondary),
                             ),
                           ],
                         ),
@@ -539,7 +613,7 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
                         Text(
                           _exercise.notes?.isNotEmpty == true
                               ? _exercise.notes!
-                              : 'No notes yet — tap the pencil to add your own.',
+                              : 'No notes yet. Tap the pencil to add your own.',
                           style: AppText.smallText,
                         ),
                         if (_exercise.youtubeUrl != null &&
@@ -551,8 +625,12 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
                               foregroundColor: AppColors.textPrimary,
                               minimumSize: const Size(double.infinity, 40),
                             ),
-                            onPressed: () => launchUrl(Uri.parse(_exercise.youtubeUrl!)),
-                            icon: const Icon(Icons.play_circle_outline, size: 18),
+                            onPressed: () =>
+                                launchUrl(Uri.parse(_exercise.youtubeUrl!)),
+                            icon: const Icon(
+                              Icons.play_circle_outline,
+                              size: 18,
+                            ),
                             label: const Text('Watch form video'),
                           ),
                         ],
@@ -580,17 +658,22 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
               children: [
                 Text('Goal', style: AppText.subHeader),
                 InfoTooltip(
-                  glossaryKey: isBodyweightLift ? 'strength_goal_bodyweight' : 'strength_goal',
+                  glossaryKey: isBodyweightLift
+                      ? 'strength_goal_bodyweight'
+                      : 'strength_goal',
                   title: 'Goal',
                 ),
                 const Spacer(),
                 IconButton(
-                  icon: const Icon(Icons.tune, size: 18, color: AppColors.textSecondary),
+                  icon: const Icon(
+                    Icons.tune,
+                    size: 18,
+                    color: AppColors.textSecondary,
+                  ),
                   tooltip: 'Your goals',
-                  padding: EdgeInsets.zero,
-                  visualDensity: VisualDensity.compact,
-                  constraints: const BoxConstraints(),
-                  onPressed: () => _openCustomGoalHistory(isBodyweightLift: isBodyweightLift),
+                  onPressed: () => _openCustomGoalHistory(
+                    isBodyweightLift: isBodyweightLift,
+                  ),
                 ),
               ],
             ),
@@ -598,9 +681,17 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
               const SizedBox(height: AppSpacing.small),
               Row(
                 children: [
-                  _goalSourceChip('Standard', GoalSource.standard, effectiveGoalSource),
+                  _goalSourceChip(
+                    'Standard',
+                    GoalSource.standard,
+                    effectiveGoalSource,
+                  ),
                   const SizedBox(width: AppSpacing.small),
-                  _goalSourceChip('My Goal', GoalSource.custom, effectiveGoalSource),
+                  _goalSourceChip(
+                    'My Goal',
+                    GoalSource.custom,
+                    effectiveGoalSource,
+                  ),
                 ],
               ),
             ],
@@ -629,47 +720,52 @@ class _LiftDetailScreenState extends State<LiftDetailScreen> {
           if (_sessions.isEmpty)
             Text('No sessions logged yet.', style: AppText.smallText)
           else
-            ..._sessions.map((s) => Padding(
-                  padding: const EdgeInsets.only(bottom: AppSpacing.cardGap),
-                  child: AppCard(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(s.session.date, style: AppText.bodyText),
-                            GestureDetector(
-                              onTap: () => _editSession(s),
-                              child: const Icon(Icons.edit_outlined,
-                                  size: 18, color: AppColors.textSecondary),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: AppSpacing.small),
-                        ...s.sets.map((set) => Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 2),
-                              child: Text(
-                                'Set ${set.setNumber}: ${set.reps} reps @ ${Units.format(set.weight)}'
-                                '${set.rpe != null ? ' · ${EffortDisplay.toDisplay(set.rpe!).toStringAsFixed(0)} reps left' : ''}',
-                                style: AppText.smallText,
-                              ),
-                            )),
-                        if (s.session.notes != null && s.session.notes!.isNotEmpty) ...[
-                          const SizedBox(height: AppSpacing.small),
-                          Text(
-                            s.session.notes!,
-                            style: AppText.smallText.copyWith(fontStyle: FontStyle.italic),
+            ..._sessions.map(
+              (s) => Padding(
+                padding: const EdgeInsets.only(bottom: AppSpacing.cardGap),
+                child: AppCard(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(s.session.date, style: AppText.bodyText),
+                          TapIcon(
+                            icon: Icons.edit_outlined,
+                            onTap: () => _editSession(s),
                           ),
                         ],
+                      ),
+                      const SizedBox(height: AppSpacing.small),
+                      ...s.sets.map(
+                        (set) => Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 2),
+                          child: Text(
+                            'Set ${set.setNumber}: ${set.reps} reps @ ${Units.format(set.weight)}'
+                            '${set.rpe != null ? ' · ${EffortDisplay.toDisplay(set.rpe!).toStringAsFixed(0)} reps left' : ''}',
+                            style: AppText.smallText,
+                          ),
+                        ),
+                      ),
+                      if (s.session.notes != null &&
+                          s.session.notes!.isNotEmpty) ...[
+                        const SizedBox(height: AppSpacing.small),
+                        Text(
+                          s.session.notes!,
+                          style: AppText.smallText.copyWith(
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
                       ],
-                    ),
+                    ],
                   ),
-                )),
+                ),
+              ),
+            ),
           const SizedBox(height: AppSpacing.xLarge),
         ],
       ),
     );
   }
 }
-

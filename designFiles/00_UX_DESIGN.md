@@ -106,3 +106,9 @@ Bottom nav, 5 destinations:
 - No visible bodyweight number anywhere in the main UI — stored and used internally (e.g. lift-as-%-bodyweight, recomposition flags) but never rendered as a number the user reads directly.
 - No single gamified "score." No push notifications in v1 for any smart-trend content.
 - No precise "you gained X kg of muscle" claims — recomposition signals are qualitative flags only (see science doc).
+
+## Tap targets (audited 2026-07-20)
+Every interactive element gets a real tap target, not just a tappable icon. A small glyph (edit pencil, delete, history notebook) wrapped directly in a bare `GestureDetector` ends up with a hit area equal to the icon's own pixel size, often 16-20px, well under Android's ~48dp guidance — this had crept in across most of the app's small action icons. Fixed with a shared widget, `TapIcon` (`lib/widgets/tap_icon.dart`): pads the invisible hit area out to a consistent ~40px circle around the glyph (via `InkResponse`, which also gets a ripple for free) without changing how big the icon looks. Used everywhere a small action icon sits next to other content — workout-row edit pencils, metric-card notebook/add/delete icons, HIIT setup's remove buttons, and so on. Full-row/full-card tap targets (a `GestureDetector` wrapping an entire `Row` or `AppCard.onTap`) were already fine and weren't touched.
+
+## Text style: no em dashes in user-facing copy
+Any string the user actually reads (card text, tooltips, dialog content, snackbars, hints) avoids the em dash (—) — it reads as AI-generated and is mildly distracting once you notice it. Use a period, comma, parenthetical, or colon instead, whichever reads most natural for the sentence. This applies to prose only, not the standalone `'—'` glyph used as an empty-value placeholder (e.g. a stat card showing "—" when nothing's logged yet — that's a normal UI convention, not sentence-joining prose) and not source code comments, which aren't user-facing.

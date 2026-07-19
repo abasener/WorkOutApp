@@ -23,12 +23,18 @@ class _PlateCalculatorSheetState extends State<PlateCalculatorSheet> {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
       child: Container(
-        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.85,
+        ),
         decoration: const BoxDecoration(
           color: AppColors.surfaceRaised,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.card)),
+          borderRadius: BorderRadius.vertical(
+            top: Radius.circular(AppRadius.card),
+          ),
         ),
         padding: EdgeInsets.fromLTRB(
           AppSpacing.edge,
@@ -53,7 +59,9 @@ class _PlateCalculatorSheetState extends State<PlateCalculatorSheet> {
             const SizedBox(height: AppSpacing.large),
             Flexible(
               child: SingleChildScrollView(
-                child: _showBarbell ? const _BarbellTab() : const _SimpleCalculatorTab(),
+                child: _showBarbell
+                    ? const _BarbellTab()
+                    : const _SimpleCalculatorTab(),
               ),
             ),
           ],
@@ -122,7 +130,8 @@ class _BarbellTabState extends State<_BarbellTab> {
   final _plateController = TextEditingController();
   final List<double> _plates = [];
 
-  List<double> get _barPresets => Units.current == WeightUnit.kg ? [20, 15] : [45, 35];
+  List<double> get _barPresets =>
+      Units.current == WeightUnit.kg ? [20, 15] : [45, 35];
 
   @override
   void dispose() {
@@ -165,7 +174,11 @@ class _BarbellTabState extends State<_BarbellTab> {
                   _barWeight = preset;
                 }),
               ),
-            _choiceChip('Custom', _customBar, () => setState(() => _customBar = true)),
+            _choiceChip(
+              'Custom',
+              _customBar,
+              () => setState(() => _customBar = true),
+            ),
           ],
         ),
         if (_customBar) ...[
@@ -182,16 +195,20 @@ class _BarbellTabState extends State<_BarbellTab> {
           ),
         ],
         const SizedBox(height: AppSpacing.large),
-        Text('Plates — one side (mirrored automatically)', style: AppText.label),
+        Text('Plates, one side (mirrored automatically)', style: AppText.label),
         const SizedBox(height: AppSpacing.small),
         Row(
           children: [
             Expanded(
               child: TextField(
                 controller: _plateController,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
                 style: AppText.bodyText,
-                decoration: InputDecoration(labelText: 'Plate weight ($suffix)'),
+                decoration: InputDecoration(
+                  labelText: 'Plate weight ($suffix)',
+                ),
                 onSubmitted: (_) => _addPlate(),
               ),
             ),
@@ -217,7 +234,9 @@ class _BarbellTabState extends State<_BarbellTab> {
             children: [
               Expanded(child: _plateChips(mirrored: true)),
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.small),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.small,
+                ),
                 child: Text('BAR', style: AppText.label),
               ),
               Expanded(child: _plateChips(mirrored: false)),
@@ -270,8 +289,10 @@ class _BarbellTabState extends State<_BarbellTab> {
               borderRadius: BorderRadius.circular(AppRadius.button),
               border: Border.all(color: AppColors.border),
             ),
-            child: Text(plate.toStringAsFixed(plate == plate.roundToDouble() ? 0 : 1),
-                style: AppText.smallText),
+            child: Text(
+              plate.toStringAsFixed(plate == plate.roundToDouble() ? 0 : 1),
+              style: AppText.smallText,
+            ),
           ),
         );
       }).toList(),
@@ -286,7 +307,9 @@ class _BarbellTabState extends State<_BarbellTab> {
         decoration: BoxDecoration(
           color: selected ? AppColors.accent : AppColors.surface,
           borderRadius: BorderRadius.circular(AppRadius.pill),
-          border: Border.all(color: selected ? AppColors.accent : AppColors.border),
+          border: Border.all(
+            color: selected ? AppColors.accent : AppColors.border,
+          ),
         ),
         child: Text(
           label,
@@ -390,7 +413,9 @@ class _SimpleCalculatorTabState extends State<_SimpleCalculatorTab> {
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.accent,
               foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.button)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(AppRadius.button),
+              ),
             ),
             onPressed: _pressEquals,
             child: const Text('='),
@@ -412,7 +437,12 @@ class _SimpleCalculatorTabState extends State<_SimpleCalculatorTab> {
   }
 
   Widget _key(String label) {
-    const opMap = {'+': CalcOp.add, '−': CalcOp.subtract, '×': CalcOp.multiply, '÷': CalcOp.divide};
+    const opMap = {
+      '+': CalcOp.add,
+      '−': CalcOp.subtract,
+      '×': CalcOp.multiply,
+      '÷': CalcOp.divide,
+    };
     final isOp = opMap.containsKey(label);
     return SizedBox(
       height: 52,

@@ -17,7 +17,7 @@ Master list of trackable movements — both the seeded "big lifts" and user-adde
 | equipment_tags | TEXT, nullable | a separate multi-valued tag dimension from `category`: comma-separated values from `ExerciseType` (cardio/machine/compound/bodyweight), e.g. `"compound"`. Drives Lifts-list filtering/sorting (`03_SCREEN_lifts.md`) and, for `bodyweight`, a different e1RM/goal calculation path (`07_SMART_TRENDS.md`). The 5 barbell seed lifts are tagged `compound`; Pull Up/Push Up are tagged `bodyweight`. |
 | movement_patterns | TEXT, nullable | a third multi-valued tag dimension: comma-separated `MovementPattern` values (squat/hinge/horizontalPush/verticalPush/horizontalPull/verticalPull + 6 accessory patterns). Powers the Workout Planner's pattern-pool browsing (`10_WORKOUT_PLANNER.md`) — not used anywhere else. |
 | is_seeded | INTEGER (bool) | true for the seeded library, false for user-added custom movements |
-| pinned | INTEGER (bool), default 0 | the "usual suspects" — drives the quick-log dropdown (pinned-only) and a Lifts-list quick filter. Original 7 seed lifts default to pinned; the ~68 bulk-added ones don't. See `03_SCREEN_lifts.md` "Pinned lifts." |
+| pinned | INTEGER (bool), default 0 | the "usual suspects" — drives the quick-log dropdown (pinned-only) and a Lifts-list quick filter. 8 curated seed lifts default to pinned (redone 2026-07-21, see `03_SCREEN_lifts.md` "Pinned lifts"); everything else doesn't. |
 | youtube_url | TEXT, nullable | form-check video link |
 | created | TEXT | ISO date |
 | goal_source | TEXT, nullable | `'standard'` \| `'custom'` \| `null` (auto). `null` picks a published standard if one exists, else the latest `custom_goals` entry if one exists, else no goal shown — see `custom_goals` below. Added v12. |
@@ -118,10 +118,56 @@ A **log**, not one-per-exercise — the exercise's `goal_source`/gauge reads the
 | exercise_id | INTEGER FK → exercises | no uniqueness constraint — an exercise can have many rows |
 | label | TEXT, nullable | user-typed name for this goal entry (a date, "August target," whatever) — falls back to displaying `created`'s date if unset |
 | target_weight | REAL, nullable | lb, canonical — set when the exercise's goal axis is weight |
-| target_reps | INTEGER, nullable | set when the exercise's goal axis is reps (bodyweight-tagged exercises) — exactly one of `target_weight`/`target_reps` is set per row, enforced in code |
+| target_reps | INTEGER, nullable | set when the exercise's goal axis is reps (bodyweight-tagged exercises) |
+| target_distance | REAL, nullable | meters canonical (or a raw floor count for a floors-unit exercise) — cardio exercises, added v18, see `11_SCREEN_cardio.md` |
+| target_pace | REAL, nullable | seconds per canonical meter (or per floor) — cardio exercises, added v18 as `target_speed`, renamed+changed basis v19 (pace, not speed — see `11_SCREEN_cardio.md` "Per-exercise distance units") |
 | created | TEXT | ISO datetime |
 
-## `progress_photos`
+Exactly one of `target_weight`/`target_reps` (lift exercises) or `target_distance`/`target_pace` (cardio exercises) is set per row — enforced in code, not a CHECK constraint.
+
+## `cardio_sessions` / `cardio_entries` (added v18, see `11_SCREEN_cardio.md`)
+Cardio's counterpart to `lift_sessions`/`lift_sets` — same session-then-entries shape, kept as a fully separate table pair rather than reusing the lift tables, since reps/weight never meant anything for "how far did you run."
+
+**`cardio_sessions`**: id, exercise_id (FK → exercises, `ON DELETE CASCADE`), date, notes (nullable).
+
+**`cardio_entries`**:
+
+| column | type | notes |
+|---|---|---|
+| id | INTEGER PK | |
+| session_id | INTEGER FK → cardio_sessions | `ON DELETE CASCADE` |
+| entry_number | INTEGER | order within the session — usually just one entry, but interval-style cardio can log several |
+| distance_canonical | REAL, nullable | meters, or a raw floor count for a floors-unit exercise — added v18 as `distance_miles`, renamed+changed basis v19 once distance units became per-exercise (`Exercise.cardioUnit`) instead of the app-wide lb/kg toggle |
+| duration_seconds | INTEGER, nullable | |
+| load | REAL, nullable | generic, **unitless** resistance/incline/added-load number — never run through a unit conversion, since it doesn't consistently mean "weight" (a rower's resistance level and a treadmill's incline % aren't the same unit). Labeled "Resistance (optional)" in the entry forms |
+| rpe | REAL, nullable | 1-10, entered directly (not the lift form's "reps left" inversion) — labeled "Effort (1-10)," 10 = hardest |
+| entry_started_at / entry_completed_at | TEXT, nullable | present for parity with `lift_sets`' same (also currently unused) columns — a possible future timer-auto-fill write target, not wired up yet |
+
+Pace (`CardioUnits.paceSecondsPerUnit`), like `LiftSet.e1rm`, is always derived from distance+duration, never stored on the entry itself — only a *goal's* pace (`custom_goals.target_pace`) is a real stored number, for comparison purposes.
+
+## `exercises.cardio_unit` (added v19, see `11_SCREEN_cardio.md`)
+`DistanceUnit?` (`'miles'` \| `'km'` \| `'meters'` \| `'floors'`), only meaningful for `ExerciseType.cardio`-tagged rows — the exercise's own designated distance unit (a run in miles, a row in meters, stairs in floors), set via `AddExerciseSheet`. Every logged entry/goal for that exercise displays and converts through this one unit regardless of which unit an individual entry was typed in. `null` = not a cardio exercise, or a cardio exercise that predates this column (falls back to `CardioUnits.defaultUnit`, miles).
+
+## `hiit_sessions` / `hiit_slots` (added v20, see `12_SCREEN_hiit.md`)
+A HIIT workout builds and runs entirely in these two tables, but **saves into the normal `lift_sessions`/`lift_sets` and `cardio_sessions`/`cardio_entries` tables** — a completed HIIT session is indistinguishable from manually-logged sets at the data level, these tables just remember the routine's shape and (for an in-progress session) exactly where playback is.
+
+**`hiit_sessions`**: id, date, notes (nullable), started_at, completed_at (nullable), status (`'active'` \| `'completed'` \| `'aborted'`, same convention as `PlannedSession`), automatic (INTEGER bool — the automatic/manual toggle chosen at setup), plus live-resume state: current_sequence_index, current_phase (`'work'` \| `'rest'`), phase_started_at (nullable), phase_remaining_seconds (nullable REAL), current_reps_remaining (nullable INTEGER), paused (INTEGER bool). The resume-state columns are what let leaving the active-session screen (paused or not) and coming back later reconstruct exactly where playback was — see `12_SCREEN_hiit.md` "Pausing and resuming."
+
+**`hiit_slots`** — one row per exercise occurrence, in strict play order:
+
+| column | type | notes |
+|---|---|---|
+| id | INTEGER PK | |
+| hiit_session_id | INTEGER | `ON DELETE CASCADE`, no FK constraint declared (see below) |
+| sequence_index | INTEGER | global play order across the whole routine |
+| group_index | INTEGER | which round — for the progress bar's round markers and to know which slot's rest is "between rounds" |
+| exercise_id | INTEGER | no FK constraint — set at setup time, well before any `lift_set`/`cardio_entry` referencing it exists |
+| exercise_kind | TEXT | `'lift'` \| `'cardio'` — stored redundantly rather than re-derived from the exercise's tags every time |
+| target_type | TEXT | `'reps'` \| `'amrap'` \| `'time'` \| `'distance'` |
+| target_value / weight | REAL, nullable | set once at setup, never edited live |
+| rest_after_seconds | INTEGER, nullable | `null`/`0` = "Direct" (no rest before the next slot) |
+| actual_reps / actual_weight / actual_time_seconds / actual_distance / actual_load | nullable | filled in live during the session (or assumed-equal-to-target for cardio) and correctable on the report screen before saving |
+| lift_set_id / cardio_entry_id | INTEGER, nullable | **not populated in v1** — `LiftRepository.logSession`/`CardioRepository.logSession` don't return per-row ids today, so the Workouts tab instead groups a day's HIIT-produced sets by (date, exercise_id) rather than a direct FK. Reserved for a future precision pass. |
 A date-stamped image log — multiple rows can share a `date` (different angles/poses the same day).
 
 | column | type | notes |
@@ -191,7 +237,7 @@ Still just planned, not yet keys in the table: rolling window lengths (default 7
 ## Migration discipline
 Per starter bundle rules: every new column goes in both `_onCreate` and a numbered `_migrate` step; `_kDbVersion` only ever increases. Given how much this schema will grow (custom exercises, new metric types, live-timer fields already anticipated above), expect frequent version bumps early on — that's fine, just keep this doc in sync with each one. This is also what makes the personal/demo split (below) safe: a schema bump runs `_onCreate`/`_migrate` identically against whichever file is opened, so upgrading the app never wipes real logged data as long as every migration stays additive (`ALTER TABLE`, new tables, backfills) — never a `DROP`/destructive rewrite of existing rows.
 
-Current version: **16** (`exercises.equipment_tags` at v4; v5 backfilled the bulk exercise library onto existing installs; `exercises.pinned` at v6, also backfilled; v7 remaps old 5-category `metrics_log.metric_type` soreness keys to the new 14-sub-region keys; v8 adds `exercises.movement_patterns` — Workout Planner phase 1; v9 adds `workout_templates`/`workout_template_days`/`planned_sessions` and seeds the default template — Workout Planner phase 2; v10 renames the seeded default template's day labels from "Day 1".."Day 5" to pattern-descriptive names — `10_WORKOUT_PLANNER.md`; v11 backfills 16 more seeded exercises — 8 dynamic bodyweight core movements + 8 machines cross-checked against the user's actual Precor gym equipment, see `03_SCREEN_lifts.md` "Bulk exercise library"; v12 adds `exercises.goal_source`/`progress_metric` and the original one-row-per-exercise `custom_goals` table; v13 reshapes `custom_goals` into a log — DROPs and recreates the v12 table rather than migrating rows, since it had shipped without any real usage yet; v14 adds `exercises.notes`/`target_muscles`; v15 adds `progress_photos`, `custom_metrics`, `custom_metric_entries`; v16 adds `custom_metrics.allow_multiple_per_day`; v17 adds `todo_items` — Home's Checklist widget, see `02_SCREEN_home.md`).
+Current version: **20** (`exercises.equipment_tags` at v4; v5 backfilled the bulk exercise library onto existing installs; `exercises.pinned` at v6, also backfilled; v7 remaps old 5-category `metrics_log.metric_type` soreness keys to the new 14-sub-region keys; v8 adds `exercises.movement_patterns` — Workout Planner phase 1; v9 adds `workout_templates`/`workout_template_days`/`planned_sessions` and seeds the default template — Workout Planner phase 2; v10 renames the seeded default template's day labels from "Day 1".."Day 5" to pattern-descriptive names — `10_WORKOUT_PLANNER.md`; v11 backfills 16 more seeded exercises — 8 dynamic bodyweight core movements + 8 machines cross-checked against the user's actual Precor gym equipment, see `03_SCREEN_lifts.md` "Bulk exercise library"; v12 adds `exercises.goal_source`/`progress_metric` and the original one-row-per-exercise `custom_goals` table; v13 reshapes `custom_goals` into a log — DROPs and recreates the v12 table rather than migrating rows, since it had shipped without any real usage yet; v14 adds `exercises.notes`/`target_muscles`; v15 adds `progress_photos`, `custom_metrics`, `custom_metric_entries`; v16 adds `custom_metrics.allow_multiple_per_day`; v17 adds `todo_items` — Home's Checklist widget, see `02_SCREEN_home.md`; v18 adds `cardio_sessions`/`cardio_entries` and `custom_goals.target_distance`/`target_speed`, backfills 6 new seeded cardio exercises; v19 adds `exercises.cardio_unit` and renames v18's `cardio_entries.distance_miles`→`distance_canonical` and `custom_goals.target_speed`→`target_pace` (per-exercise distance units + pace-not-speed goals, both revisions from same-week on-device feedback) — see `11_SCREEN_cardio.md`; v20 adds `hiit_sessions`/`hiit_slots` — see `12_SCREEN_hiit.md`).
 
 ## Personal vs. demo data set — implemented
 

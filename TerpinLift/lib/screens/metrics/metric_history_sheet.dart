@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../theme/app_theme.dart';
+import '../../widgets/tap_icon.dart';
 
 /// One row in a [MetricHistorySheet] — deliberately not tied to any
 /// particular metric's model type, since Steps/Sleep/Weight/Soreness/
@@ -34,19 +35,29 @@ class MetricHistoryRow {
 class MetricHistorySheet extends StatelessWidget {
   final String title;
   final List<MetricHistoryRow> rows;
-  const MetricHistorySheet({super.key, required this.title, required this.rows});
+  const MetricHistorySheet({
+    super.key,
+    required this.title,
+    required this.rows,
+  });
 
   @override
   Widget build(BuildContext context) {
     final sorted = [...rows]..sort((a, b) => b.date.compareTo(a.date));
 
     return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
       child: Container(
-        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.85,
+        ),
         decoration: const BoxDecoration(
           color: AppColors.surfaceRaised,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.card)),
+          borderRadius: BorderRadius.vertical(
+            top: Radius.circular(AppRadius.card),
+          ),
         ),
         padding: EdgeInsets.fromLTRB(
           AppSpacing.edge,
@@ -66,15 +77,20 @@ class MetricHistorySheet extends StatelessWidget {
                   : ListView.separated(
                       shrinkWrap: true,
                       itemCount: sorted.length,
-                      separatorBuilder: (context, i) => const SizedBox(height: AppSpacing.small),
+                      separatorBuilder: (context, i) =>
+                          const SizedBox(height: AppSpacing.small),
                       itemBuilder: (context, i) {
                         final row = sorted[i];
                         return Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: AppSpacing.standard, vertical: AppSpacing.small),
+                            horizontal: AppSpacing.standard,
+                            vertical: AppSpacing.small,
+                          ),
                           decoration: BoxDecoration(
                             border: Border.all(color: AppColors.border),
-                            borderRadius: BorderRadius.circular(AppRadius.button),
+                            borderRadius: BorderRadius.circular(
+                              AppRadius.button,
+                            ),
                           ),
                           child: Row(
                             children: [
@@ -86,19 +102,19 @@ class MetricHistorySheet extends StatelessWidget {
                                   children: [
                                     Text(row.date, style: AppText.bodyText),
                                     if (row.valueText != null)
-                                      Text(row.valueText!, style: AppText.smallText),
+                                      Text(
+                                        row.valueText!,
+                                        style: AppText.smallText,
+                                      ),
                                     ...?row.tags?.map((t) => _Tag(label: t)),
                                   ],
                                 ),
                               ),
-                              if (row.onEdit != null) ...[
-                                const SizedBox(width: AppSpacing.standard),
-                                GestureDetector(
+                              if (row.onEdit != null)
+                                TapIcon(
+                                  icon: Icons.edit_outlined,
                                   onTap: row.onEdit,
-                                  child: const Icon(Icons.edit_outlined,
-                                      size: 18, color: AppColors.textSecondary),
                                 ),
-                              ],
                             ],
                           ),
                         );

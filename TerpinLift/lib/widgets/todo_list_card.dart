@@ -8,6 +8,7 @@ import '../services/app_services.dart';
 import '../services/notification_service.dart';
 import '../theme/app_theme.dart';
 import 'app_card.dart';
+import 'tap_icon.dart';
 
 /// Home's Checklist widget — a fixed, user-edited list of recurring
 /// reminders ("bring water bottle," "log sleep"), each with a circular
@@ -104,20 +105,22 @@ class _TodoListCardState extends State<TodoListCard> {
             children: [
               Text('Checklist', style: AppText.bodyText),
               const Spacer(),
-              GestureDetector(
-                onTap: _edit,
-                child: const Icon(Icons.edit_outlined, size: 18, color: AppColors.textSecondary),
-              ),
+              TapIcon(icon: Icons.edit_outlined, size: 18, onTap: _edit),
             ],
           ),
           const SizedBox(height: AppSpacing.small),
           if (_loading)
             const Padding(
               padding: EdgeInsets.symmetric(vertical: AppSpacing.standard),
-              child: Center(child: CircularProgressIndicator(color: AppColors.accent)),
+              child: Center(
+                child: CircularProgressIndicator(color: AppColors.accent),
+              ),
             )
           else if (_items.isEmpty)
-            Text('No items yet — tap the pencil to add some.', style: AppText.smallText)
+            Text(
+              'No items yet. Tap the pencil to add some.',
+              style: AppText.smallText,
+            )
           else
             ..._items.map(_row),
         ],
@@ -143,7 +146,9 @@ class _TodoListCardState extends State<TodoListCard> {
               child: Text(
                 item.text,
                 style: AppText.bodyText.copyWith(
-                  color: checked ? AppColors.textSecondary : AppColors.textPrimary,
+                  color: checked
+                      ? AppColors.textSecondary
+                      : AppColors.textPrimary,
                   decoration: checked ? TextDecoration.lineThrough : null,
                 ),
               ),

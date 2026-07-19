@@ -48,12 +48,12 @@ class MuscleStatusRow extends StatelessWidget {
     final label = _categoryLabels[category] ?? category.label;
     switch (status) {
       case MuscleGroupStatus.ready:
-        return '$label looks recovered — a solid candidate to train today.';
+        return '$label looks recovered. A solid candidate to train today.';
       case MuscleGroupStatus.resting:
         return '$label was trained recently and is still inside its typical '
-            'recovery window — nothing wrong, just give it more time.';
+            'recovery window. Nothing wrong, just give it more time.';
       case MuscleGroupStatus.overreaching:
-        return "$label's effort has been creeping up while its numbers dip — "
+        return "$label's effort has been creeping up while its numbers dip, "
             'a sign of pushing this one specifically too hard lately. Doesn\'t '
             'mean rest everything, just ease up on this group for a bit.';
     }
@@ -72,7 +72,9 @@ class MuscleStatusRow extends StatelessWidget {
         ),
         decoration: const BoxDecoration(
           color: AppColors.surfaceRaised,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.card)),
+          borderRadius: BorderRadius.vertical(
+            top: Radius.circular(AppRadius.card),
+          ),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -82,11 +84,17 @@ class MuscleStatusRow extends StatelessWidget {
               children: [
                 Icon(_iconFor(s.status), color: _colorFor(s.status), size: 22),
                 const SizedBox(width: AppSpacing.small),
-                Text(_categoryLabels[s.category] ?? s.category.label, style: AppText.subHeader),
+                Text(
+                  _categoryLabels[s.category] ?? s.category.label,
+                  style: AppText.subHeader,
+                ),
               ],
             ),
             const SizedBox(height: AppSpacing.small),
-            Text(_explanationFor(s.category, s.status), style: AppText.bodyText),
+            Text(
+              _explanationFor(s.category, s.status),
+              style: AppText.bodyText,
+            ),
           ],
         ),
       ),

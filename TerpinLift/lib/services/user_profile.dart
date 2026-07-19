@@ -3,7 +3,8 @@ enum Gender { female, male }
 extension GenderKey on Gender {
   String get key => this == Gender.female ? 'female' : 'male';
   String get label => this == Gender.female ? 'Female' : 'Male';
-  static Gender fromKey(String? key) => key == 'male' ? Gender.male : Gender.female;
+  static Gender fromKey(String? key) =>
+      key == 'male' ? Gender.male : Gender.female;
 }
 
 /// Broad age brackets for the strength-standard goal system — buckets, not a
@@ -100,6 +101,12 @@ abstract class UserProfile {
   /// Daily step target for the Home week-rings widget. Was hardcoded at
   /// 10,000 (the generic default); now user-adjustable in Settings.
   static int stepsGoal = 10000;
+
+  /// Whether this profile has completed (or been grandfathered past) the
+  /// onboarding survey — `AppRoot` reads this once at startup to decide
+  /// between showing `OnboardingFlow` and going straight to `RootShell`.
+  /// Defaults false; `AppServices` resolves the real value per profile.
+  static bool onboardingComplete = false;
 
   static AgeBucket get ageBucket {
     if (birthYear == null) return AgeBucket.twenties;

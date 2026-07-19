@@ -1,5 +1,7 @@
 import 'package:flutter_body_heatmap/flutter_body_heatmap.dart';
 
+import 'distance_unit.dart';
+
 /// Rough body-region tags used to label exercises. An exercise can carry
 /// more than one (e.g. Bench Press: chest + push + arms).
 enum ExerciseCategory { legs, core, arms, back, chest, push, pull }
@@ -176,6 +178,13 @@ class Exercise {
   /// skipped it where it was optional).
   final List<Muscle> targetMuscles;
 
+  /// Only meaningful for `ExerciseType.cardio`-tagged exercises — which
+  /// distance unit its entries display/convert in (a run tracked in miles
+  /// and a row tracked in meters can coexist app-wide). `null` = not set
+  /// yet (falls back to `CardioUnits.defaultUnit`) or not a cardio exercise.
+  /// See designFiles/11_SCREEN_cardio.md.
+  final DistanceUnit? cardioUnit;
+
   const Exercise({
     this.id,
     required this.name,
@@ -190,6 +199,7 @@ class Exercise {
     this.progressMetric,
     this.notes,
     this.targetMuscles = const [],
+    this.cardioUnit,
   });
 
   factory Exercise.fromMap(Map<String, dynamic> m) => Exercise(
@@ -225,6 +235,7 @@ class Exercise {
             .where((s) => s.isNotEmpty)
             .map((key) => Muscle.values.firstWhere((mu) => mu.name == key))
             .toList(),
+        cardioUnit: DistanceUnitKey.fromKey(m['cardio_unit'] as String?),
       );
 
   Map<String, dynamic> toMap() => {
@@ -240,6 +251,7 @@ class Exercise {
         'progress_metric': progressMetric?.key,
         'notes': notes,
         'target_muscles': targetMuscles.map((m) => m.name).join(','),
+        'cardio_unit': cardioUnit?.key,
       };
 
   Exercise copyWith({
@@ -260,6 +272,8 @@ class Exercise {
     String? notes,
     bool clearNotes = false,
     List<Muscle>? targetMuscles,
+    DistanceUnit? cardioUnit,
+    bool clearCardioUnit = false,
   }) =>
       Exercise(
         id: id,
@@ -276,5 +290,6 @@ class Exercise {
         pinned: pinned ?? this.pinned,
         notes: clearNotes ? null : (notes ?? this.notes),
         targetMuscles: targetMuscles ?? this.targetMuscles,
+        cardioUnit: clearCardioUnit ? null : (cardioUnit ?? this.cardioUnit),
       );
 }

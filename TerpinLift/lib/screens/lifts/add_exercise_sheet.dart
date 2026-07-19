@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_body_heatmap/flutter_body_heatmap.dart';
 
 import '../../data/models/custom_goal.dart';
+import '../../data/models/distance_unit.dart';
 import '../../data/models/exercise.dart';
 import '../../services/app_services.dart';
+import '../../services/cardio_units.dart';
 import '../../services/muscle_map.dart';
 import '../../services/units.dart';
 import '../../theme/app_theme.dart';
@@ -41,10 +43,12 @@ class AddExerciseSheet extends StatefulWidget {
 }
 
 class _AddExerciseSheetState extends State<AddExerciseSheet> {
-  late final _nameController =
-      TextEditingController(text: widget.existing?.name ?? '');
-  late final _youtubeController =
-      TextEditingController(text: widget.existing?.youtubeUrl ?? '');
+  late final _nameController = TextEditingController(
+    text: widget.existing?.name ?? '',
+  );
+  late final _youtubeController = TextEditingController(
+    text: widget.existing?.youtubeUrl ?? '',
+  );
   late final _goalController = TextEditingController();
   late final _notesController = TextEditingController();
   late final Set<ExerciseCategory> _categories = {
@@ -61,6 +65,7 @@ class _AddExerciseSheetState extends State<AddExerciseSheet> {
   late Set<Muscle> _targetMuscles = widget.existing == null
       ? {}
       : MuscleMap.musclesFor(widget.existing!).toSet();
+  late DistanceUnit? _cardioUnit = widget.existing?.cardioUnit;
   bool _saving = false;
 
   /// Which wizard step is showing — only relevant in add mode (edit mode
@@ -69,7 +74,8 @@ class _AddExerciseSheetState extends State<AddExerciseSheet> {
   static const _stepCount = 3;
 
   bool get _isEditing => widget.existing != null;
-  bool get _isBodyweightLift => _equipmentTags.contains(ExerciseType.bodyweight);
+  bool get _isBodyweightLift =>
+      _equipmentTags.contains(ExerciseType.bodyweight);
 
   @override
   void dispose() {
@@ -93,7 +99,9 @@ class _AddExerciseSheetState extends State<AddExerciseSheet> {
     // not staged for a later Save button (there isn't one dedicated to just
     // muscles), so persist immediately.
     if (_isEditing) {
-      final updated = widget.existing!.copyWith(targetMuscles: _targetMuscles.toList());
+      final updated = widget.existing!.copyWith(
+        targetMuscles: _targetMuscles.toList(),
+      );
       await AppServices.exercises.update(updated);
       AppServices.signalReload();
     }
@@ -101,13 +109,17 @@ class _AddExerciseSheetState extends State<AddExerciseSheet> {
 
   void _goNext() {
     if (_step == 0 && _nameController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Name is required.')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Name is required.')));
       return;
     }
     if (_step == 1 && _targetMuscles.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Pick at least one muscle this movement targets.')));
+        const SnackBar(
+          content: Text('Pick at least one muscle this movement targets.'),
+        ),
+      );
       return;
     }
     setState(() => _step += 1);
@@ -117,55 +129,74 @@ class _AddExerciseSheetState extends State<AddExerciseSheet> {
 
   Future<void> _submit() async {
     if (_nameController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Name is required.')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Name is required.')));
       return;
     }
     if (_targetMuscles.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Pick at least one muscle this movement targets.')));
+        const SnackBar(
+          content: Text('Pick at least one muscle this movement targets.'),
+        ),
+      );
       return;
     }
     setState(() => _saving = true);
     final youtubeUrl = _youtubeController.text.trim().isEmpty
         ? null
         : _youtubeController.text.trim();
-    final notes = _notesController.text.trim().isEmpty ? null : _notesController.text.trim();
+    final notes = _notesController.text.trim().isEmpty
+        ? null
+        : _notesController.text.trim();
 
     if (_isEditing) {
-      await AppServices.exercises.update(widget.existing!.copyWith(
-        name: _nameController.text.trim(),
-        categories: _categories.toList(),
-        equipmentTags: _equipmentTags.toList(),
-        // No `patterns:` — movement patterns are a backend/seed-data concept
-        // for the Workout Planner's pattern-pool matching, not something the
-        // app lets a user assign; omitting keeps whatever's already there.
-        youtubeUrl: youtubeUrl,
-        targetMuscles: _targetMuscles.toList(),
-      ));
+      await AppServices.exercises.update(
+        widget.existing!.copyWith(
+          name: _nameController.text.trim(),
+          categories: _categories.toList(),
+          equipmentTags: _equipmentTags.toList(),
+          // No `patterns:` — movement patterns are a backend/seed-data concept
+          // for the Workout Planner's pattern-pool matching, not something the
+          // app lets a user assign; omitting keeps whatever's already there.
+          youtubeUrl: youtubeUrl,
+          targetMuscles: _targetMuscles.toList(),
+          cardioUnit: _equipmentTags.contains(ExerciseType.cardio)
+              ? (_cardioUnit ?? CardioUnits.defaultUnit)
+              : null,
+          clearCardioUnit: !_equipmentTags.contains(ExerciseType.cardio),
+        ),
+      );
     } else {
       final today = DateTime.now().toIso8601String().substring(0, 10);
       // No `patterns:` here either — a custom exercise added from the app
       // simply doesn't participate in the Workout Planner's pattern slots;
       // assigning a pattern is a backend edit, not a user-facing one.
-      final id = await AppServices.exercises.insert(Exercise(
-        name: _nameController.text.trim(),
-        categories: _categories.toList(),
-        equipmentTags: _equipmentTags.toList(),
-        isSeeded: false,
-        youtubeUrl: youtubeUrl,
-        created: today,
-        notes: notes,
-        targetMuscles: _targetMuscles.toList(),
-      ));
+      final id = await AppServices.exercises.insert(
+        Exercise(
+          name: _nameController.text.trim(),
+          categories: _categories.toList(),
+          equipmentTags: _equipmentTags.toList(),
+          isSeeded: false,
+          youtubeUrl: youtubeUrl,
+          created: today,
+          notes: notes,
+          targetMuscles: _targetMuscles.toList(),
+          cardioUnit: _equipmentTags.contains(ExerciseType.cardio)
+              ? (_cardioUnit ?? CardioUnits.defaultUnit)
+              : null,
+        ),
+      );
       final goalEntered = double.tryParse(_goalController.text);
       if (goalEntered != null) {
-        await AppServices.customGoals.insert(CustomGoal(
-          exerciseId: id,
-          targetReps: _isBodyweightLift ? goalEntered.round() : null,
-          targetWeight: _isBodyweightLift ? null : Units.toLb(goalEntered),
-          created: DateTime.now().toIso8601String(),
-        ));
+        await AppServices.customGoals.insert(
+          CustomGoal(
+            exerciseId: id,
+            targetReps: _isBodyweightLift ? goalEntered.round() : null,
+            targetWeight: _isBodyweightLift ? null : Units.toLb(goalEntered),
+            created: DateTime.now().toIso8601String(),
+          ),
+        );
       }
     }
     AppServices.signalReload();
@@ -173,20 +204,24 @@ class _AddExerciseSheetState extends State<AddExerciseSheet> {
   }
 
   Future<void> _delete() async {
-    final sessions =
-        await AppServices.lifts.getSessionsForExercise(widget.existing!.id!);
+    final sessions = await AppServices.lifts.getSessionsForExercise(
+      widget.existing!.id!,
+    );
     if (!mounted) return;
 
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.surfaceRaised,
-        title: Text('Delete ${widget.existing!.name}?', style: AppText.subHeader),
+        title: Text(
+          'Delete ${widget.existing!.name}?',
+          style: AppText.subHeader,
+        ),
         content: Text(
           sessions.isEmpty
               ? 'This exercise has no logged sessions. This cannot be undone.'
               : 'This also deletes all ${sessions.length} logged session'
-                  '${sessions.length == 1 ? '' : 's'} for this exercise. This cannot be undone.',
+                    '${sessions.length == 1 ? '' : 's'} for this exercise. This cannot be undone.',
           style: AppText.bodyText,
         ),
         actions: [
@@ -196,7 +231,10 @@ class _AddExerciseSheetState extends State<AddExerciseSheet> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete', style: TextStyle(color: AppColors.accent)),
+            child: const Text(
+              'Delete',
+              style: TextStyle(color: AppColors.accent),
+            ),
           ),
         ],
       ),
@@ -210,125 +248,162 @@ class _AddExerciseSheetState extends State<AddExerciseSheet> {
     if (mounted) Navigator.pop(context, true);
   }
 
-  Widget _chipWrap<T>(List<T> values, Set<T> selected, String Function(T) labelOf) => Wrap(
-        spacing: AppSpacing.small,
-        runSpacing: AppSpacing.small,
-        children: values.map((v) {
-          final isSelected = selected.contains(v);
-          return FilterChip(
-            label: Text(labelOf(v)),
-            selected: isSelected,
-            onSelected: (sel) =>
-                setState(() => sel ? selected.add(v) : selected.remove(v)),
-            backgroundColor: AppColors.surface,
-            selectedColor: AppColors.accentDim,
-            labelStyle: TextStyle(
-                color: isSelected ? AppColors.accent : AppColors.textSecondary),
-            side: BorderSide(color: isSelected ? AppColors.accent : AppColors.border),
-          );
-        }).toList(),
+  Widget _chipWrap<T>(
+    List<T> values,
+    Set<T> selected,
+    String Function(T) labelOf,
+  ) => Wrap(
+    spacing: AppSpacing.small,
+    runSpacing: AppSpacing.small,
+    children: values.map((v) {
+      final isSelected = selected.contains(v);
+      return FilterChip(
+        label: Text(labelOf(v)),
+        selected: isSelected,
+        onSelected: (sel) =>
+            setState(() => sel ? selected.add(v) : selected.remove(v)),
+        backgroundColor: AppColors.surface,
+        selectedColor: AppColors.accentDim,
+        labelStyle: TextStyle(
+          color: isSelected ? AppColors.accent : AppColors.textSecondary,
+        ),
+        side: BorderSide(
+          color: isSelected ? AppColors.accent : AppColors.border,
+        ),
       );
+    }).toList(),
+  );
 
   Widget _nameAndTagsStep() => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TextField(
-            controller: _nameController,
-            style: AppText.bodyText,
-            decoration: const InputDecoration(labelText: 'Name'),
-          ),
-          const SizedBox(height: AppSpacing.large),
-          Text('Categories (optional)', style: AppText.label),
-          const SizedBox(height: AppSpacing.standard),
-          _chipWrap(ExerciseCategory.values, _categories, (c) => c.label),
-          const SizedBox(height: AppSpacing.standard),
-          Text('Equipment/type (optional)', style: AppText.label),
-          const SizedBox(height: AppSpacing.standard),
-          _chipWrap(ExerciseType.values, _equipmentTags, (t) => t.label),
-          const SizedBox(height: AppSpacing.standard),
-          TextField(
-            controller: _youtubeController,
-            style: AppText.bodyText,
-            decoration: const InputDecoration(labelText: 'YouTube form link (optional)'),
-          ),
-        ],
-      );
+    crossAxisAlignment: CrossAxisAlignment.start,
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      TextField(
+        controller: _nameController,
+        style: AppText.bodyText,
+        decoration: const InputDecoration(labelText: 'Name'),
+      ),
+      const SizedBox(height: AppSpacing.large),
+      Text('Categories (optional)', style: AppText.label),
+      const SizedBox(height: AppSpacing.standard),
+      _chipWrap(ExerciseCategory.values, _categories, (c) => c.label),
+      const SizedBox(height: AppSpacing.standard),
+      Text('Equipment/type (optional)', style: AppText.label),
+      const SizedBox(height: AppSpacing.standard),
+      _chipWrap(ExerciseType.values, _equipmentTags, (t) => t.label),
+      if (_equipmentTags.contains(ExerciseType.cardio)) ...[
+        const SizedBox(height: AppSpacing.standard),
+        Text('Distance unit', style: AppText.label),
+        const SizedBox(height: AppSpacing.micro),
+        Text(
+          'Every logged entry converts to this exercise\'s own unit, so a '
+          'sprint tracked in meters and a run tracked in miles stay comparable.',
+          style: AppText.smallText,
+        ),
+        const SizedBox(height: AppSpacing.standard),
+        Wrap(
+          spacing: AppSpacing.small,
+          runSpacing: AppSpacing.small,
+          children: DistanceUnit.values.map((u) {
+            final selected = (_cardioUnit ?? CardioUnits.defaultUnit) == u;
+            return ChoiceChip(
+              label: Text(u.label),
+              selected: selected,
+              showCheckmark: false,
+              onSelected: (_) => setState(() => _cardioUnit = u),
+            );
+          }).toList(),
+        ),
+      ],
+      const SizedBox(height: AppSpacing.standard),
+      TextField(
+        controller: _youtubeController,
+        style: AppText.bodyText,
+        decoration: const InputDecoration(
+          labelText: 'YouTube form link (optional)',
+        ),
+      ),
+    ],
+  );
 
   Widget _musclesStep() => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text('Muscles targeted', style: AppText.label),
-          const SizedBox(height: AppSpacing.small),
-          Text(
-            'Pick every muscle this movement works — used for the Lift detail '
-            'muscle diagram.',
-            style: AppText.smallText,
-          ),
-          const SizedBox(height: AppSpacing.standard),
-          OutlinedButton.icon(
-            style: OutlinedButton.styleFrom(
-              side: const BorderSide(color: AppColors.border),
-              foregroundColor: AppColors.textPrimary,
-              minimumSize: const Size(double.infinity, 44),
-            ),
-            onPressed: _pickMuscles,
-            icon: const Icon(Icons.accessibility_new),
-            label: const Text('Select Muscles'),
-          ),
-          const SizedBox(height: AppSpacing.standard),
-          Text(
-            _targetMuscles.isEmpty
-                ? 'No muscles selected yet.'
-                : _targetMuscles.map((m) => m.name).join(', '),
-            style: AppText.smallText,
-          ),
-        ],
-      );
+    crossAxisAlignment: CrossAxisAlignment.start,
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Text('Muscles targeted', style: AppText.label),
+      const SizedBox(height: AppSpacing.small),
+      Text(
+        'Pick every muscle this movement works. Used for the Lift detail '
+        'muscle diagram.',
+        style: AppText.smallText,
+      ),
+      const SizedBox(height: AppSpacing.standard),
+      OutlinedButton.icon(
+        style: OutlinedButton.styleFrom(
+          side: const BorderSide(color: AppColors.border),
+          foregroundColor: AppColors.textPrimary,
+          minimumSize: const Size(double.infinity, 44),
+        ),
+        onPressed: _pickMuscles,
+        icon: const Icon(Icons.accessibility_new),
+        label: const Text('Select Muscles'),
+      ),
+      const SizedBox(height: AppSpacing.standard),
+      Text(
+        _targetMuscles.isEmpty
+            ? 'No muscles selected yet.'
+            : _targetMuscles.map((m) => m.name).join(', '),
+        style: AppText.smallText,
+      ),
+    ],
+  );
 
   Widget _goalAndNotesStep() => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text('Goal (optional)', style: AppText.label),
-          const SizedBox(height: AppSpacing.standard),
-          TextField(
-            controller: _goalController,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            style: AppText.bodyText,
-            decoration: InputDecoration(
-              labelText: _isBodyweightLift ? 'Target reps' : 'Target weight (${Units.suffix})',
-            ),
-          ),
-          const SizedBox(height: AppSpacing.large),
-          Text('Notes (optional)', style: AppText.label),
-          const SizedBox(height: AppSpacing.standard),
-          TextField(
-            controller: _notesController,
-            style: AppText.bodyText,
-            maxLines: 4,
-            minLines: 2,
-            decoration: const InputDecoration(hintText: 'Form cues, reminders, whatever helps.'),
-          ),
-        ],
-      );
+    crossAxisAlignment: CrossAxisAlignment.start,
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Text('Goal (optional)', style: AppText.label),
+      const SizedBox(height: AppSpacing.standard),
+      TextField(
+        controller: _goalController,
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        style: AppText.bodyText,
+        decoration: InputDecoration(
+          labelText: _isBodyweightLift
+              ? 'Target reps'
+              : 'Target weight (${Units.suffix})',
+        ),
+      ),
+      const SizedBox(height: AppSpacing.large),
+      Text('Notes (optional)', style: AppText.label),
+      const SizedBox(height: AppSpacing.standard),
+      TextField(
+        controller: _notesController,
+        style: AppText.bodyText,
+        maxLines: 4,
+        minLines: 2,
+        decoration: const InputDecoration(
+          hintText: 'Form cues, reminders, whatever helps.',
+        ),
+      ),
+    ],
+  );
 
   Widget _stepDots() => Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: List.generate(_stepCount, (i) {
-          final active = i == _step;
-          return Container(
-            margin: const EdgeInsets.symmetric(horizontal: 3),
-            width: active ? 20 : 6,
-            height: 6,
-            decoration: BoxDecoration(
-              color: active ? AppColors.accent : AppColors.border,
-              borderRadius: BorderRadius.circular(3),
-            ),
-          );
-        }),
+    mainAxisAlignment: MainAxisAlignment.center,
+    children: List.generate(_stepCount, (i) {
+      final active = i == _step;
+      return Container(
+        margin: const EdgeInsets.symmetric(horizontal: 3),
+        width: active ? 20 : 6,
+        height: 6,
+        decoration: BoxDecoration(
+          color: active ? AppColors.accent : AppColors.border,
+          borderRadius: BorderRadius.circular(3),
+        ),
       );
+    }),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -339,11 +414,15 @@ class _AddExerciseSheetState extends State<AddExerciseSheet> {
     };
 
     return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
       child: Container(
         decoration: const BoxDecoration(
           color: AppColors.surfaceRaised,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.card)),
+          borderRadius: BorderRadius.vertical(
+            top: Radius.circular(AppRadius.card),
+          ),
         ),
         padding: EdgeInsets.fromLTRB(
           AppSpacing.edge,
@@ -356,8 +435,10 @@ class _AddExerciseSheetState extends State<AddExerciseSheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(_isEditing ? 'Edit Movement' : 'Add Custom Movement',
-                  style: AppText.subHeader),
+              Text(
+                _isEditing ? 'Edit Movement' : 'Add Custom Movement',
+                style: AppText.subHeader,
+              ),
               const SizedBox(height: AppSpacing.large),
               if (_isEditing) ...[
                 _nameAndTagsStep(),
@@ -378,7 +459,8 @@ class _AddExerciseSheetState extends State<AddExerciseSheet> {
                       backgroundColor: AppColors.accent,
                       foregroundColor: Colors.white,
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(AppRadius.button)),
+                        borderRadius: BorderRadius.circular(AppRadius.button),
+                      ),
                     ),
                     onPressed: _saving ? null : _submit,
                     child: _saving
@@ -386,7 +468,10 @@ class _AddExerciseSheetState extends State<AddExerciseSheet> {
                             width: 20,
                             height: 20,
                             child: CircularProgressIndicator(
-                                strokeWidth: 2, color: Colors.white))
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
                         : const Text('Save'),
                   ),
                 )
@@ -413,7 +498,10 @@ class _AddExerciseSheetState extends State<AddExerciseSheet> {
                           foregroundColor: Colors.white,
                           minimumSize: const Size(double.infinity, 52),
                           shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(AppRadius.button)),
+                            borderRadius: BorderRadius.circular(
+                              AppRadius.button,
+                            ),
+                          ),
                         ),
                         onPressed: _saving
                             ? null
@@ -423,7 +511,10 @@ class _AddExerciseSheetState extends State<AddExerciseSheet> {
                                 width: 20,
                                 height: 20,
                                 child: CircularProgressIndicator(
-                                    strokeWidth: 2, color: Colors.white))
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
                             : Text(_step < _stepCount - 1 ? 'Next' : 'Save'),
                       ),
                     ),

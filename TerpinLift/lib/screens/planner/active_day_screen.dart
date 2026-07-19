@@ -46,7 +46,9 @@ class _ActiveDayScreenState extends State<ActiveDayScreen> {
   bool _loading = true;
   List<SessionWithSets> _allSessions = [];
   Map<int, Exercise> _exercisesById = {};
-  late final _notesController = TextEditingController(text: widget.session.notes ?? '');
+  late final _notesController = TextEditingController(
+    text: widget.session.notes ?? '',
+  );
   Timer? _ticker;
   Duration _elapsed = Duration.zero;
 
@@ -58,8 +60,9 @@ class _ActiveDayScreenState extends State<ActiveDayScreen> {
   // exists; kept as plain `DateTime` (not ISO strings) so `showTimePicker`
   // has something to seed from directly.
   late DateTime _editedStart = DateTime.parse(widget.session.startedAt);
-  late DateTime? _editedEnd =
-      widget.session.completedAt == null ? null : DateTime.parse(widget.session.completedAt!);
+  late DateTime? _editedEnd = widget.session.completedAt == null
+      ? null
+      : DateTime.parse(widget.session.completedAt!);
 
   bool get _isActive => _session.status == PlannedSessionStatus.active;
 
@@ -72,7 +75,11 @@ class _ActiveDayScreenState extends State<ActiveDayScreen> {
       _elapsed = DateTime.now().difference(DateTime.parse(_session.startedAt));
       _ticker = Timer.periodic(const Duration(seconds: 30), (_) {
         if (!mounted) return;
-        setState(() => _elapsed = DateTime.now().difference(DateTime.parse(_session.startedAt)));
+        setState(
+          () => _elapsed = DateTime.now().difference(
+            DateTime.parse(_session.startedAt),
+          ),
+        );
       });
     }
   }
@@ -91,7 +98,10 @@ class _ActiveDayScreenState extends State<ActiveDayScreen> {
     if (!mounted) return;
     setState(() {
       _allSessions = sessions;
-      _exercisesById = {for (final e in exercises) if (e.id != null) e.id!: e};
+      _exercisesById = {
+        for (final e in exercises)
+          if (e.id != null) e.id!: e,
+      };
       _loading = false;
     });
   }
@@ -108,13 +118,15 @@ class _ActiveDayScreenState extends State<ActiveDayScreen> {
       initialTime: TimeOfDay.fromDateTime(_editedStart),
     );
     if (picked == null) return;
-    setState(() => _editedStart = DateTime(
-          _editedStart.year,
-          _editedStart.month,
-          _editedStart.day,
-          picked.hour,
-          picked.minute,
-        ));
+    setState(
+      () => _editedStart = DateTime(
+        _editedStart.year,
+        _editedStart.month,
+        _editedStart.day,
+        picked.hour,
+        picked.minute,
+      ),
+    );
   }
 
   Future<void> _pickEnd() async {
@@ -124,13 +136,15 @@ class _ActiveDayScreenState extends State<ActiveDayScreen> {
       initialTime: TimeOfDay.fromDateTime(base),
     );
     if (picked == null) return;
-    setState(() => _editedEnd = DateTime(
-          base.year,
-          base.month,
-          base.day,
-          picked.hour,
-          picked.minute,
-        ));
+    setState(
+      () => _editedEnd = DateTime(
+        base.year,
+        base.month,
+        base.day,
+        picked.hour,
+        picked.minute,
+      ),
+    );
   }
 
   Future<void> _openSlot(MovementPattern pattern) async {
@@ -147,7 +161,7 @@ class _ActiveDayScreenState extends State<ActiveDayScreen> {
         backgroundColor: AppColors.surfaceRaised,
         title: Text('Abort this session?', style: AppText.subHeader),
         content: Text(
-          'Anything you\'ve already logged stays in your history — this just '
+          'Anything you\'ve already logged stays in your history. This just '
           'clears the active session.',
           style: AppText.bodyText,
         ),
@@ -158,7 +172,10 @@ class _ActiveDayScreenState extends State<ActiveDayScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Abort', style: TextStyle(color: AppColors.accent)),
+            child: const Text(
+              'Abort',
+              style: TextStyle(color: AppColors.accent),
+            ),
           ),
         ],
       ),
@@ -182,7 +199,9 @@ class _ActiveDayScreenState extends State<ActiveDayScreen> {
     final updated = _session.copyWith(
       notes: _notesController.text,
       startedAt: _isActive ? null : _editedStart.toIso8601String(),
-      completedAt: _isActive || _editedEnd == null ? null : _editedEnd!.toIso8601String(),
+      completedAt: _isActive || _editedEnd == null
+          ? null
+          : _editedEnd!.toIso8601String(),
     );
     await AppServices.workoutPlans.updateSession(updated);
     AppServices.signalReload();
@@ -196,7 +215,7 @@ class _ActiveDayScreenState extends State<ActiveDayScreen> {
         backgroundColor: AppColors.surfaceRaised,
         title: Text('Delete this workout?', style: AppText.subHeader),
         content: Text(
-          'The lifts you logged stay in your history — this just removes '
+          'The lifts you logged stay in your history. This just removes '
           'the day grouping around them.',
           style: AppText.bodyText,
         ),
@@ -207,7 +226,10 @@ class _ActiveDayScreenState extends State<ActiveDayScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete', style: TextStyle(color: AppColors.accent)),
+            child: const Text(
+              'Delete',
+              style: TextStyle(color: AppColors.accent),
+            ),
           ),
         ],
       ),
@@ -245,7 +267,9 @@ class _ActiveDayScreenState extends State<ActiveDayScreen> {
       backgroundColor: AppColors.background,
       appBar: AppBar(title: Text(widget.day.dayLabel)),
       body: _loading
-          ? const Center(child: CircularProgressIndicator(color: AppColors.accent))
+          ? const Center(
+              child: CircularProgressIndicator(color: AppColors.accent),
+            )
           : ListView(
               padding: const EdgeInsets.all(AppSpacing.edge),
               children: [
@@ -253,8 +277,11 @@ class _ActiveDayScreenState extends State<ActiveDayScreen> {
                   child: Row(
                     children: [
                       if (_isActive) ...[
-                        const Icon(Icons.timer_outlined,
-                            size: 18, color: AppColors.textSecondary),
+                        const Icon(
+                          Icons.timer_outlined,
+                          size: 18,
+                          color: AppColors.textSecondary,
+                        ),
                         const SizedBox(width: AppSpacing.micro),
                         Text(_elapsedLabel, style: AppText.smallText),
                         const Spacer(),
@@ -291,7 +318,8 @@ class _ActiveDayScreenState extends State<ActiveDayScreen> {
                   onTapOutside: (_) => _saveNotes(_notesController.text),
                   onSubmitted: _saveNotes,
                 ),
-                if (!_isActive && _session.status == PlannedSessionStatus.completed) ...[
+                if (!_isActive &&
+                    _session.status == PlannedSessionStatus.completed) ...[
                   const SizedBox(height: AppSpacing.large),
                   Row(
                     children: [
@@ -303,7 +331,7 @@ class _ActiveDayScreenState extends State<ActiveDayScreen> {
                   ),
                   const SizedBox(height: AppSpacing.small),
                   Text(
-                    'Fix these if a workout logged short — a lift log form '
+                    'Fix these if a workout logged short. A lift log form '
                     'only tracks how long it was open, not the real workout '
                     'length.',
                     style: AppText.smallText,
@@ -329,9 +357,11 @@ class _ActiveDayScreenState extends State<ActiveDayScreen> {
                             foregroundColor: AppColors.textPrimary,
                           ),
                           onPressed: _pickEnd,
-                          child: Text(_editedEnd == null
-                              ? 'End: —'
-                              : 'End: ${_formatTime(_editedEnd!)}'),
+                          child: Text(
+                            _editedEnd == null
+                                ? 'End: —'
+                                : 'End: ${_formatTime(_editedEnd!)}',
+                          ),
                         ),
                       ),
                     ],
@@ -346,7 +376,8 @@ class _ActiveDayScreenState extends State<ActiveDayScreen> {
                       backgroundColor: AppColors.accent,
                       foregroundColor: Colors.white,
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(AppRadius.button)),
+                        borderRadius: BorderRadius.circular(AppRadius.button),
+                      ),
                     ),
                     onPressed: _isActive ? _complete : _saveChanges,
                     child: Text(_isActive ? 'Complete' : 'Save changes'),
@@ -372,11 +403,11 @@ class _ActiveDayScreenState extends State<ActiveDayScreen> {
   }
 
   double _progressFraction() => WorkoutPlanService.progressFraction(
-        _session.date,
-        widget.day.patterns,
-        _allSessions,
-        _exercisesById,
-      );
+    _session.date,
+    widget.day.patterns,
+    _allSessions,
+    _exercisesById,
+  );
 
   Widget _slotCard(MovementPattern pattern) {
     final matches = WorkoutPlanService.matchedSessions(
@@ -385,7 +416,9 @@ class _ActiveDayScreenState extends State<ActiveDayScreen> {
       _allSessions,
       _exercisesById,
     );
-    final poolSize = _exercisesById.values.where((e) => e.patterns.contains(pattern)).length;
+    final poolSize = _exercisesById.values
+        .where((e) => e.patterns.contains(pattern))
+        .length;
     final doneNames = matches
         .map((s) => _exercisesById[s.session.exerciseId]?.name)
         .whereType<String>()
@@ -399,7 +432,9 @@ class _ActiveDayScreenState extends State<ActiveDayScreen> {
         child: Row(
           children: [
             Icon(
-              matches.isEmpty ? Icons.radio_button_unchecked : Icons.check_circle_outline,
+              matches.isEmpty
+                  ? Icons.radio_button_unchecked
+                  : Icons.check_circle_outline,
               color: matches.isEmpty ? AppColors.textSecondary : AppColors.good,
               size: 20,
             ),

@@ -11,6 +11,7 @@ enum HomeWidgetId {
   trainingSplit,
   strengthTrends,
   metricTrend,
+  hiit,
 }
 
 extension HomeWidgetIdKey on HomeWidgetId {
@@ -41,6 +42,8 @@ extension HomeWidgetIdKey on HomeWidgetId {
         return 'Strength Trend';
       case HomeWidgetId.metricTrend:
         return 'Metric Trend';
+      case HomeWidgetId.hiit:
+        return 'HIIT';
     }
   }
 
@@ -65,6 +68,8 @@ extension HomeWidgetIdKey on HomeWidgetId {
         return Icons.fitness_center;
       case HomeWidgetId.metricTrend:
         return Icons.show_chart;
+      case HomeWidgetId.hiit:
+        return Icons.bolt;
     }
   }
 }

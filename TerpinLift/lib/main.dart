@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'screens/root_shell.dart';
+import 'screens/app_root.dart';
 import 'services/app_services.dart';
 import 'services/notification_service.dart';
 import 'theme/app_theme.dart';
@@ -18,10 +18,10 @@ class TerpinLiftApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'TerpinLift',
+      title: 'TerrapinLift',
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(),
-      home: const RootShell(),
+      home: const AppRoot(),
     );
   }
 }

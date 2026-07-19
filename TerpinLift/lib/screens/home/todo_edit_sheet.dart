@@ -11,7 +11,7 @@ class _EditableTodo {
   TimeOfDay? time;
 
   _EditableTodo({this.id, required String text, this.time})
-      : textController = TextEditingController(text: text);
+    : textController = TextEditingController(text: text);
 }
 
 TimeOfDay _parseTime(String hhmm) {
@@ -40,12 +40,14 @@ class _TodoEditSheetState extends State<TodoEditSheet> {
   late final List<_EditableTodo> _rows = widget.items.isEmpty
       ? [_EditableTodo(text: '')]
       : widget.items
-          .map((i) => _EditableTodo(
+            .map(
+              (i) => _EditableTodo(
                 id: i.id,
                 text: i.text,
                 time: i.timeOfDay == null ? null : _parseTime(i.timeOfDay!),
-              ))
-          .toList();
+              ),
+            )
+            .toList();
   bool _saving = false;
 
   @override
@@ -67,7 +69,20 @@ class _TodoEditSheetState extends State<TodoEditSheet> {
   Future<void> _save() async {
     setState(() => _saving = true);
 
-    final kept = _rows.where((r) => r.textController.text.trim().isNotEmpty).toList();
+    // A row being edited here carries no `lastCheckedDate` of its own (the
+    // sheet never touches check state) — without preserving it explicitly,
+    // building a fresh `TodoItem` per row defaults it to null and the
+    // `replaceAll` below would silently uncheck every item on every save,
+    // edit-sheet or not.
+    final lastCheckedById = {
+      for (final old in widget.items)
+        if (old.id != null) old.id!: old.lastCheckedDate,
+    };
+    final today = DateTime.now().toIso8601String().substring(0, 10);
+
+    final kept = _rows
+        .where((r) => r.textController.text.trim().isNotEmpty)
+        .toList();
     final items = [
       for (var i = 0; i < kept.length; i++)
         TodoItem(
@@ -75,6 +90,9 @@ class _TodoEditSheetState extends State<TodoEditSheet> {
           text: kept[i].textController.text.trim(),
           timeOfDay: kept[i].time == null ? null : _formatTime(kept[i].time!),
           sortOrder: i,
+          lastCheckedDate: kept[i].id == null
+              ? null
+              : lastCheckedById[kept[i].id],
         ),
     ];
     await AppServices.todos.replaceAll(items);
@@ -82,7 +100,10 @@ class _TodoEditSheetState extends State<TodoEditSheet> {
 
     // Clear out every previously-scheduled reminder first (covers removed
     // items and items whose time changed/cleared), then reschedule fresh
-    // for whichever items currently have a time set.
+    // for whichever items currently have a time set. An item already
+    // checked off today gets `skipToday: true` — otherwise saving the
+    // sheet (even just to add an unrelated item) would silently re-arm
+    // today's reminder for something already done.
     for (final old in widget.items) {
       if (old.id != null) await NotificationService.cancel(old.id!);
     }
@@ -97,6 +118,7 @@ class _TodoEditSheetState extends State<TodoEditSheet> {
         body: item.text,
         hour: t.hour,
         minute: t.minute,
+        skipToday: item.isCheckedOn(today),
       );
     }
 
@@ -115,7 +137,9 @@ class _TodoEditSheetState extends State<TodoEditSheet> {
             visualDensity: VisualDensity.compact,
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(),
-            onPressed: _rows.length <= 1 ? null : () => setState(() => _rows.removeAt(i)),
+            onPressed: _rows.length <= 1
+                ? null
+                : () => setState(() => _rows.removeAt(i)),
             icon: const Icon(Icons.remove_circle_outline, size: 18),
             color: AppColors.textSecondary,
             disabledColor: AppColors.border,
@@ -156,12 +180,18 @@ class _TodoEditSheetState extends State<TodoEditSheet> {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
       child: Container(
-        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.85,
+        ),
         decoration: const BoxDecoration(
           color: AppColors.surfaceRaised,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.card)),
+          borderRadius: BorderRadius.vertical(
+            top: Radius.circular(AppRadius.card),
+          ),
         ),
         padding: EdgeInsets.fromLTRB(
           AppSpacing.edge,
@@ -177,7 +207,7 @@ class _TodoEditSheetState extends State<TodoEditSheet> {
               Text('Edit Checklist', style: AppText.subHeader),
               const SizedBox(height: AppSpacing.small),
               Text(
-                'Set a time to get a daily reminder for that item — leave it '
+                'Set a time to get a daily reminder for that item. Leave it '
                 '"None" for a plain checklist row.',
                 style: AppText.smallText,
               ),
@@ -190,7 +220,8 @@ class _TodoEditSheetState extends State<TodoEditSheet> {
                   foregroundColor: AppColors.textPrimary,
                   minimumSize: const Size(double.infinity, 44),
                 ),
-                onPressed: () => setState(() => _rows.add(_EditableTodo(text: ''))),
+                onPressed: () =>
+                    setState(() => _rows.add(_EditableTodo(text: ''))),
                 icon: const Icon(Icons.add),
                 label: const Text('Add another item'),
               ),
@@ -203,14 +234,19 @@ class _TodoEditSheetState extends State<TodoEditSheet> {
                     backgroundColor: AppColors.accent,
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(AppRadius.button)),
+                      borderRadius: BorderRadius.circular(AppRadius.button),
+                    ),
                   ),
                   onPressed: _saving ? null : _save,
                   child: _saving
                       ? const SizedBox(
                           width: 20,
                           height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
                       : const Text('Save'),
                 ),
               ),
