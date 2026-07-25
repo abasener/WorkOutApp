@@ -865,7 +865,7 @@ class TestDataService {
     }
 
     for (final entry in raw.entries) {
-      await AppServices.metrics.insert(
+      await AppServices.metrics.upsertSorenessEntry(
         MetricEntry(
           date: dateStr,
           metricType: MetricTypeKey.forSorenessRegion(
@@ -873,6 +873,13 @@ class TestDataService {
           ),
           value: entry.value.round().clamp(0, 5).toDouble(),
           loggedAt: loggedAt,
+          // Randomly AM or PM rather than leaving this null (unslotted) —
+          // demo/sample data should actually exercise the AM/PM UI (the
+          // Days tab's per-slot rows, the edit form's toggle) instead of
+          // only ever showing the legacy no-slot fallback everywhere.
+          timeSlot: _rand.nextBool()
+              ? SorenessTimeSlot.am
+              : SorenessTimeSlot.pm,
         ),
       );
     }

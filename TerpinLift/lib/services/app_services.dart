@@ -57,6 +57,8 @@ abstract final class AppServices {
   static const _birthYearSettingKey = 'birth_year';
   static const _hideWeightSettingKey = 'hide_weight';
   static const _stepsGoalSettingKey = 'steps_goal';
+  static const _weightGoalSettingKey = 'weight_goal_lb';
+  static const _sleepGoalSettingKey = 'sleep_goal_hours';
   static const _homeTrendMonthsKey = 'home_trend_months';
   static const _homeWidgetOrderKey = 'home_widget_order';
   static const _metricWidgetOrderKey = 'metric_widget_order';
@@ -121,6 +123,18 @@ abstract final class AppServices {
 
     final storedStepsGoal = await settings.get(_stepsGoalSettingKey);
     UserProfile.stepsGoal = int.tryParse(storedStepsGoal ?? '') ?? 10000;
+
+    // No fallback default for these two -- unlike stepsGoal, "no goal set"
+    // is the common, legitimate starting state.
+    final storedWeightGoal = await settings.get(_weightGoalSettingKey);
+    UserProfile.weightGoalLb = storedWeightGoal == null
+        ? null
+        : double.tryParse(storedWeightGoal);
+
+    final storedSleepGoal = await settings.get(_sleepGoalSettingKey);
+    UserProfile.sleepGoalHours = storedSleepGoal == null
+        ? null
+        : double.tryParse(storedSleepGoal);
 
     final storedTrendMonths = await settings.get(_homeTrendMonthsKey);
     HomeTrendSettings.months = int.tryParse(storedTrendMonths ?? '') ?? 6;
@@ -288,6 +302,30 @@ abstract final class AppServices {
   static Future<void> setStepsGoal(int goal) async {
     UserProfile.stepsGoal = goal;
     await settings.set(_stepsGoalSettingKey, goal.toString());
+    signalReload();
+  }
+
+  /// `null` clears the goal (deletes the stored key) rather than writing a
+  /// placeholder value — clearing the Settings field is a legitimate way to
+  /// go back to "no goal set", not an error state like an empty Steps goal
+  /// would be.
+  static Future<void> setWeightGoal(double? goalLb) async {
+    UserProfile.weightGoalLb = goalLb;
+    if (goalLb == null) {
+      await settings.delete(_weightGoalSettingKey);
+    } else {
+      await settings.set(_weightGoalSettingKey, goalLb.toString());
+    }
+    signalReload();
+  }
+
+  static Future<void> setSleepGoal(double? goalHours) async {
+    UserProfile.sleepGoalHours = goalHours;
+    if (goalHours == null) {
+      await settings.delete(_sleepGoalSettingKey);
+    } else {
+      await settings.set(_sleepGoalSettingKey, goalHours.toString());
+    }
     signalReload();
   }
 

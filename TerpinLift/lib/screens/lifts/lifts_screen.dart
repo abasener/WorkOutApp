@@ -186,10 +186,14 @@ class _LiftsScreenState extends State<LiftsScreen>
     var list = _pinnedOnly
         ? _exercises.where((e) => e.pinned).toList()
         : _exercises;
+    // AND across selected filters, not OR — picking "Machine" + "Arms" +
+    // "Push" should mean an exercise tagged with all three, not any one of
+    // them (the user's own call: unless told otherwise, multiple filters
+    // narrow down, they don't broaden out).
     list = _activeFilters.isEmpty
         ? list
         : list.where((e) {
-            return _activeFilters.any(
+            return _activeFilters.every(
               (f) => f is ExerciseCategory
                   ? e.categories.contains(f)
                   : e.equipmentTags.contains(f as ExerciseType),

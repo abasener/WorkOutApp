@@ -102,6 +102,16 @@ abstract class UserProfile {
   /// 10,000 (the generic default); now user-adjustable in Settings.
   static int stepsGoal = 10000;
 
+  /// Optional daily targets for weight/sleep — unlike `stepsGoal`, these
+  /// default to `null` ("no goal set") rather than falling back to some
+  /// made-up number, since there's no sensible universal default for either.
+  /// Canonical lb for weight (same convention every other stored weight in
+  /// this app uses), converted to/from the display unit only at the
+  /// Settings field. Drive the optional dashed goal line on that metric's
+  /// trend chart and can back a "This Week" ring row, same as `stepsGoal`.
+  static double? weightGoalLb;
+  static double? sleepGoalHours;
+
   /// Whether this profile has completed (or been grandfathered past) the
   /// onboarding survey — `AppRoot` reads this once at startup to decide
   /// between showing `OnboardingFlow` and going straight to `RootShell`.

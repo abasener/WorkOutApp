@@ -19,6 +19,7 @@ import '../../services/readiness_engine.dart';
 import '../../services/training_composition_service.dart';
 import '../../services/trend_engine.dart';
 import '../../services/units.dart';
+import '../../services/user_profile.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/app_card.dart';
 import '../../widgets/info_tooltip.dart';
@@ -38,6 +39,7 @@ import '../planner/active_day_screen.dart';
 import '../planner/day_select_screen.dart';
 import 'metric_trend_edit_sheet.dart';
 import 'strength_trend_edit_sheet.dart';
+import 'week_rings_edit_sheet.dart';
 
 // Zero-state fallback (no pins yet, no customized selection) caps at this
 // many recently-active lifts — see designFiles/02_SCREEN_home.md.
@@ -412,15 +414,36 @@ class _HomeScreenState extends State<HomeScreen> {
     await _persistOrder(newOrder);
   }
 
-  Future<String?> _pickMetric({
+  /// Every ref that actually has a goal value set right now — steps always
+  /// has one; weight/sleep only if set in Settings; a custom metric only if
+  /// `kind == number` and its own goal is set. Feeds both the Metric Trend
+  /// edit sheet's goal toggle and the This Week ring picker.
+  Map<String, double> _goalsByRef() {
+    final map = <String, double>{'steps': UserProfile.stepsGoal.toDouble()};
+    if (UserProfile.weightGoalLb != null) {
+      map['weight'] = UserProfile.weightGoalLb!;
+    }
+    if (UserProfile.sleepGoalHours != null) {
+      map['sleep'] = UserProfile.sleepGoalHours!;
+    }
+    for (final m in _customMetrics) {
+      if (m.kind == CustomMetricKind.number && m.goal != null && m.id != null) {
+        map['custom:${m.id}'] = m.goal!;
+      }
+    }
+    return map;
+  }
+
+  Future<(String, bool)?> _pickMetric({
     required Set<String> excludeRefs,
     String? currentRef,
     required int months,
+    bool currentShowGoal = false,
   }) async {
     final options = MetricTrendOption.all(_customMetrics)
         .where((o) => o.ref == currentRef || !excludeRefs.contains(o.ref))
         .toList();
-    final result = await showModalBottomSheet<(String, int)>(
+    final result = await showModalBottomSheet<(String, int, bool)>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -428,12 +451,14 @@ class _HomeScreenState extends State<HomeScreen> {
         options: options,
         selectedRef: currentRef,
         months: months,
+        showGoal: currentShowGoal,
+        goalsByRef: _goalsByRef(),
       ),
     );
     if (result == null) return null;
-    final (ref, pickedMonths) = result;
+    final (ref, pickedMonths, showGoal) = result;
     await AppServices.setHomeTrendMonths(pickedMonths);
-    return ref;
+    return (ref, showGoal);
   }
 
   Future<void> _editMetricTrend(HomeLayoutItem item) async {
@@ -443,16 +468,22 @@ class _HomeScreenState extends State<HomeScreen> {
         .map((i) => i.metricRef)
         .whereType<String>()
         .toSet();
-    final ref = await _pickMetric(
+    final result = await _pickMetric(
       excludeRefs: usedRefs,
       currentRef: item.metricRef,
       months: HomeTrendSettings.months,
+      currentShowGoal: item.showGoal,
     );
-    if (ref == null) return;
+    if (result == null) return;
+    final (ref, showGoal) = result;
     final newOrder = [
       for (final i in order)
         i == item
-            ? HomeLayoutItem(HomeWidgetId.metricTrend, metricRef: ref)
+            ? HomeLayoutItem(
+                HomeWidgetId.metricTrend,
+                metricRef: ref,
+                showGoal: showGoal,
+              )
             : i,
     ];
     await _persistOrder(newOrder);
@@ -465,6 +496,7 @@ class _HomeScreenState extends State<HomeScreen> {
           (id) =>
               id != HomeWidgetId.strengthTrends &&
               id != HomeWidgetId.metricTrend &&
+              id != HomeWidgetId.weekRings &&
               !order.any((i) => i.type == id),
         )
         .toList();
@@ -490,6 +522,23 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             Text('Add a widget', style: AppText.subHeader),
             const SizedBox(height: AppSpacing.standard),
+            if (_goalsByRef().isNotEmpty)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(
+                  HomeWidgetId.weekRings.icon,
+                  color: AppColors.textSecondary,
+                ),
+                title: Text(
+                  HomeWidgetId.weekRings.label,
+                  style: AppText.bodyText,
+                ),
+                subtitle: Text(
+                  'Add another goal-linked metric\'s ring row',
+                  style: AppText.smallText,
+                ),
+                onTap: () => Navigator.pop(context, HomeWidgetId.weekRings),
+              ),
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading: Icon(
@@ -556,19 +605,140 @@ class _HomeScreenState extends State<HomeScreen> {
           .map((i) => i.metricRef)
           .whereType<String>()
           .toSet();
-      final ref = await _pickMetric(
+      final result = await _pickMetric(
         excludeRefs: usedRefs,
         currentRef: null,
         months: HomeTrendSettings.months,
       );
+      if (result == null) return;
+      final (ref, showGoal) = result;
+      await _persistOrder([
+        HomeLayoutItem(
+          HomeWidgetId.metricTrend,
+          metricRef: ref,
+          showGoal: showGoal,
+        ),
+        ...order,
+      ]);
+    } else if (picked == HomeWidgetId.weekRings) {
+      final usedRefs = order
+          .where((i) => i.type == HomeWidgetId.weekRings)
+          .map((i) => i.metricRef ?? 'steps')
+          .toSet();
+      final ref = await _pickWeekRingsMetric(
+        excludeRefs: usedRefs,
+        currentRef: null,
+      );
       if (ref == null) return;
       await _persistOrder([
-        HomeLayoutItem(HomeWidgetId.metricTrend, metricRef: ref),
+        HomeLayoutItem(
+          HomeWidgetId.weekRings,
+          metricRef: ref == 'steps' ? null : ref,
+        ),
         ...order,
       ]);
     } else {
       await _persistOrder([HomeLayoutItem(picked), ...order]);
     }
+  }
+
+  /// Only offers metrics that currently have a goal set (`_goalsByRef`) —
+  /// a ring row with nothing to measure against wouldn't mean anything.
+  /// `'steps'` is used as the picker's stand-in for a `null` metricRef (the
+  /// original, pre-repeatable meaning) so it shows/selects like any other
+  /// option rather than needing special-casing in the sheet itself.
+  Future<String?> _pickWeekRingsMetric({
+    required Set<String> excludeRefs,
+    String? currentRef,
+  }) async {
+    final goals = _goalsByRef();
+    final options = MetricTrendOption.all(_customMetrics)
+        .where((o) => goals.containsKey(o.ref))
+        .where((o) => o.ref == currentRef || !excludeRefs.contains(o.ref))
+        .toList();
+    return showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) =>
+          WeekRingsEditSheet(options: options, selectedRef: currentRef),
+    );
+  }
+
+  Future<void> _editWeekRings(HomeLayoutItem item) async {
+    final order = _currentOrder;
+    final currentRef = item.metricRef ?? 'steps';
+    final usedRefs = order
+        .where((i) => i.type == HomeWidgetId.weekRings && i != item)
+        .map((i) => i.metricRef ?? 'steps')
+        .toSet();
+    final ref = await _pickWeekRingsMetric(
+      excludeRefs: usedRefs,
+      currentRef: currentRef,
+    );
+    if (ref == null) return;
+    final newOrder = [
+      for (final i in order)
+        i == item
+            ? HomeLayoutItem(
+                HomeWidgetId.weekRings,
+                metricRef: ref == 'steps' ? null : ref,
+              )
+            : i,
+    ];
+    await _persistOrder(newOrder);
+  }
+
+  /// Resolves a This Week ring card's `metricRef` (`null` meaning steps, the
+  /// original pre-repeatable meaning) to its per-date values + goal — `null`
+  /// if that metric no longer has a goal set (cleared in Settings/on the
+  /// metric after this card was pointed at it). Reuses whichever per-date
+  /// map `_metricTrendInfo`'s sibling data already builds for each source
+  /// rather than duplicating the lookups.
+  ({String title, Map<String, double> valuesByDate, double goal})?
+  _weekRingsInfo(String? ref) {
+    final effectiveRef = ref ?? 'steps';
+    final goal = _goalsByRef()[effectiveRef];
+    if (goal == null) return null;
+    switch (effectiveRef) {
+      case 'steps':
+        return (title: 'Steps', valuesByDate: _stepsByDate, goal: goal);
+      case 'sleep':
+        return (
+          title: 'Sleep',
+          valuesByDate: {
+            for (final m
+                in _metricEntries[MetricType.sleepHours] ??
+                    const <MetricEntry>[])
+              m.date: m.value,
+          },
+          goal: goal,
+        );
+      case 'weight':
+        return (
+          title: 'Weight',
+          valuesByDate: {for (final b in _bodyweight) b.date: b.weight},
+          goal: goal,
+        );
+    }
+    if (effectiveRef.startsWith('custom:')) {
+      final id = int.tryParse(effectiveRef.substring('custom:'.length));
+      CustomMetric? metric;
+      for (final m in _customMetrics) {
+        if (m.id == id) {
+          metric = m;
+          break;
+        }
+      }
+      if (metric == null) return null;
+      final entries = _customMetricEntries[id] ?? const <CustomMetricEntry>[];
+      return (
+        title: metric.name,
+        valuesByDate: {for (final e in entries) e.date: e.value},
+        goal: goal,
+      );
+    }
+    return null;
   }
 
   /// Resolves a Metric Trend card's `metricRef` token to a title + the same
@@ -651,16 +821,28 @@ class _HomeScreenState extends State<HomeScreen> {
       case HomeWidgetId.todoList:
         return const TodoListCard();
       case HomeWidgetId.weekRings:
+        final rings = _weekRingsInfo(item.metricRef);
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('This Week', style: AppText.subHeader),
+            Text(
+              rings == null ? 'This Week' : 'This Week · ${rings.title}',
+              style: AppText.subHeader,
+            ),
             const SizedBox(height: AppSpacing.standard),
             AppCard(
-              child: WeekRings(
-                stepsByDate: _stepsByDate,
-                workoutDates: _workoutDates,
-              ),
+              child: rings == null
+                  ? Text(
+                      // Only reachable if a metric's goal got cleared after
+                      // this card was already set to track it.
+                      'This metric no longer has a goal set.',
+                      style: AppText.smallText,
+                    )
+                  : WeekRings(
+                      valuesByDate: rings.valuesByDate,
+                      goal: rings.goal,
+                      workoutDates: _workoutDates,
+                    ),
             ),
           ],
         );
@@ -806,6 +988,9 @@ class _HomeScreenState extends State<HomeScreen> {
                       points: info.points,
                       yLabelFormatter: info.yFormatter,
                       height: 130,
+                      goal: item.showGoal
+                          ? _goalsByRef()[item.metricRef]
+                          : null,
                     ),
             ),
           ],
@@ -933,6 +1118,12 @@ class _HomeScreenState extends State<HomeScreen> {
                               icon: Icons.edit_outlined,
                               size: 20,
                               onTap: () => _editMetricTrend(item),
+                            ),
+                          if (item.type == HomeWidgetId.weekRings)
+                            TapIcon(
+                              icon: Icons.edit_outlined,
+                              size: 20,
+                              onTap: () => _editWeekRings(item),
                             ),
                           ReorderableDragStartListener(
                             index: i,

@@ -3,7 +3,7 @@ import 'package:sqflite/sqflite.dart';
 import 'profile_manager.dart';
 
 class DatabaseHelper {
-  static const _kDbVersion = 20;
+  static const _kDbVersion = 23;
 
   /// Which data set this instance reads/writes — see `ProfileManager`.
   /// `AppServices.switchProfile` swaps in a new `DatabaseHelper` rather than
@@ -758,7 +758,8 @@ class DatabaseHelper {
         metric_type TEXT    NOT NULL,
         value       REAL    NOT NULL,
         logged_at   TEXT,
-        notes       TEXT
+        notes       TEXT,
+        time_slot   TEXT
       )
     ''');
 
@@ -906,7 +907,8 @@ class DatabaseHelper {
         scale_icon           TEXT,
         class_labels         TEXT,
         created              TEXT    NOT NULL,
-        allow_multiple_per_day INTEGER NOT NULL DEFAULT 0
+        allow_multiple_per_day INTEGER NOT NULL DEFAULT 0,
+        goal                 REAL
       )
     ''');
     await db.execute('''
@@ -1474,6 +1476,69 @@ class DatabaseHelper {
             FOREIGN KEY (hiit_session_id) REFERENCES hiit_sessions (id) ON DELETE CASCADE
           )
         ''');
+      case 21:
+        // Soreness AM/PM logging (designFiles/05_SCREEN_metrics.md "Soreness
+        // decay") — lets a soreness entry say explicitly which half of the
+        // day it's for, so a past log can be corrected by slot instead of
+        // only ever appended to. Nullable: existing rows, and steps/sleep
+        // (which never use this), just stay untagged.
+        await db.execute('ALTER TABLE metrics_log ADD COLUMN time_slot TEXT');
+      case 22:
+        // Backfills v21's new `time_slot` onto every pre-existing soreness
+        // row (real installs upgrading from before AM/PM logging existed) —
+        // without this, a real user's whole logged history would stay
+        // permanently unslotted, and `SorenessBodyMapForm`'s per-slot edit
+        // (queries by an exact AM or PM) can't reload an unslotted entry
+        // under either toggle position, effectively locking old data out of
+        // being corrected. Per (date, region): a single entry -> AM (most
+        // people only logged once a day); two or more -> earliest logged ->
+        // AM, latest logged -> PM, matching what `getLatest` was already
+        // treating as "today's real value" before this feature existed.
+        // Anything strictly in between (a rare same-day double-correction)
+        // is deleted rather than kept unslotted — it was already dead data,
+        // since only the latest entry per day was ever actually read.
+        final sorenessRows = await db.query(
+          'metrics_log',
+          where: "metric_type LIKE 'soreness_%' AND time_slot IS NULL",
+          orderBy: 'date, metric_type, logged_at, id',
+        );
+        final groups = <String, List<Map<String, Object?>>>{};
+        for (final row in sorenessRows) {
+          final key = '${row['date']}|${row['metric_type']}';
+          groups.putIfAbsent(key, () => []).add(row);
+        }
+        for (final rows in groups.values) {
+          await db.update(
+            'metrics_log',
+            {'time_slot': 'AM'},
+            where: 'id = ?',
+            whereArgs: [rows.first['id']],
+          );
+          if (rows.length > 1) {
+            await db.update(
+              'metrics_log',
+              {'time_slot': 'PM'},
+              where: 'id = ?',
+              whereArgs: [rows.last['id']],
+            );
+          }
+          if (rows.length > 2) {
+            for (final row in rows.sublist(1, rows.length - 1)) {
+              await db.delete(
+                'metrics_log',
+                where: 'id = ?',
+                whereArgs: [row['id']],
+              );
+            }
+          }
+        }
+      case 23:
+        // Optional goal value for a numeric custom metric (designFiles/
+        // 05_SCREEN_metrics.md "Goals") — drives that metric's dashed
+        // trend-chart goal line and lets it be picked for a "This Week"
+        // ring row. Nullable, no backfill: existing metrics simply start
+        // with no goal set, same as weight/sleep goals default to unset.
+        await db.execute('ALTER TABLE custom_metrics ADD COLUMN goal REAL');
     }
   }
 

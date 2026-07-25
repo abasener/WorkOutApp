@@ -18,11 +18,13 @@ class CustomMetricBuilderSheet extends StatefulWidget {
   const CustomMetricBuilderSheet({super.key});
 
   @override
-  State<CustomMetricBuilderSheet> createState() => _CustomMetricBuilderSheetState();
+  State<CustomMetricBuilderSheet> createState() =>
+      _CustomMetricBuilderSheetState();
 }
 
 class _CustomMetricBuilderSheetState extends State<CustomMetricBuilderSheet> {
   final _nameController = TextEditingController();
+  final _goalController = TextEditingController();
   CustomMetricKind _kind = CustomMetricKind.number;
   ScaleIcon _scaleIcon = ScaleIcon.flame;
   final List<TextEditingController> _classControllers = [
@@ -37,6 +39,7 @@ class _CustomMetricBuilderSheetState extends State<CustomMetricBuilderSheet> {
   @override
   void dispose() {
     _nameController.dispose();
+    _goalController.dispose();
     for (final c in _classControllers) {
       c.dispose();
     }
@@ -55,30 +58,39 @@ class _CustomMetricBuilderSheetState extends State<CustomMetricBuilderSheet> {
   Future<void> _save() async {
     final name = _nameController.text.trim();
     if (name.isEmpty) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Name is required.')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Name is required.')));
       return;
     }
     List<String>? classLabels;
     if (_kind == CustomMetricKind.classes) {
-      classLabels =
-          _classControllers.map((c) => c.text.trim()).where((s) => s.isNotEmpty).toList();
+      classLabels = _classControllers
+          .map((c) => c.text.trim())
+          .where((s) => s.isNotEmpty)
+          .toList();
       if (classLabels.length < 2) {
         ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Add at least 2 class labels.')));
+          const SnackBar(content: Text('Add at least 2 class labels.')),
+        );
         return;
       }
     }
     setState(() => _saving = true);
-    await AppServices.customMetrics.insertDefinition(CustomMetric(
-      name: name,
-      kind: _kind,
-      scaleMax: _kind == CustomMetricKind.scale ? _scaleMax : null,
-      scaleIcon: _kind == CustomMetricKind.scale ? _scaleIcon : null,
-      classLabels: classLabels ?? const [],
-      created: DateTime.now().toIso8601String(),
-      allowMultiplePerDay: _allowMultiplePerDay,
-    ));
+    await AppServices.customMetrics.insertDefinition(
+      CustomMetric(
+        name: name,
+        kind: _kind,
+        scaleMax: _kind == CustomMetricKind.scale ? _scaleMax : null,
+        scaleIcon: _kind == CustomMetricKind.scale ? _scaleIcon : null,
+        classLabels: classLabels ?? const [],
+        created: DateTime.now().toIso8601String(),
+        allowMultiplePerDay: _allowMultiplePerDay,
+        goal: _kind == CustomMetricKind.number
+            ? double.tryParse(_goalController.text.trim())
+            : null,
+      ),
+    );
     AppServices.signalReload();
     if (mounted) Navigator.pop(context);
   }
@@ -94,7 +106,9 @@ class _CustomMetricBuilderSheetState extends State<CustomMetricBuilderSheet> {
       onSelected: (_) => setState(() => _kind = kind),
       backgroundColor: AppColors.surface,
       selectedColor: AppColors.accentDim,
-      labelStyle: TextStyle(color: selected ? AppColors.accent : AppColors.textSecondary),
+      labelStyle: TextStyle(
+        color: selected ? AppColors.accent : AppColors.textSecondary,
+      ),
       side: BorderSide(color: selected ? AppColors.accent : AppColors.border),
     );
   }
@@ -102,14 +116,20 @@ class _CustomMetricBuilderSheetState extends State<CustomMetricBuilderSheet> {
   Widget _scaleIconChip(ScaleIcon icon, IconData iconData, String label) {
     final selected = _scaleIcon == icon;
     return ChoiceChip(
-      avatar: Icon(iconData, size: 16, color: selected ? AppColors.accent : AppColors.textSecondary),
+      avatar: Icon(
+        iconData,
+        size: 16,
+        color: selected ? AppColors.accent : AppColors.textSecondary,
+      ),
       label: Text(label),
       selected: selected,
       showCheckmark: false,
       onSelected: (_) => setState(() => _scaleIcon = icon),
       backgroundColor: AppColors.surface,
       selectedColor: AppColors.accentDim,
-      labelStyle: TextStyle(color: selected ? AppColors.accent : AppColors.textSecondary),
+      labelStyle: TextStyle(
+        color: selected ? AppColors.accent : AppColors.textSecondary,
+      ),
       side: BorderSide(color: selected ? AppColors.accent : AppColors.border),
     );
   }
@@ -117,12 +137,18 @@ class _CustomMetricBuilderSheetState extends State<CustomMetricBuilderSheet> {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
       child: Container(
-        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.85,
+        ),
         decoration: const BoxDecoration(
           color: AppColors.surfaceRaised,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.card)),
+          borderRadius: BorderRadius.vertical(
+            top: Radius.circular(AppRadius.card),
+          ),
         ),
         padding: EdgeInsets.fromLTRB(
           AppSpacing.edge,
@@ -153,6 +179,20 @@ class _CustomMetricBuilderSheetState extends State<CustomMetricBuilderSheet> {
                   _kindChip(CustomMetricKind.classes, 'Classes'),
                 ],
               ),
+              if (_kind == CustomMetricKind.number) ...[
+                const SizedBox(height: AppSpacing.large),
+                TextField(
+                  controller: _goalController,
+                  style: AppText.bodyText,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  decoration: const InputDecoration(
+                    labelText: 'Goal (optional)',
+                    hintText: 'e.g. 8',
+                  ),
+                ),
+              ],
               if (_kind == CustomMetricKind.scale) ...[
                 const SizedBox(height: AppSpacing.large),
                 Text('Icon', style: AppText.label),
@@ -161,7 +201,11 @@ class _CustomMetricBuilderSheetState extends State<CustomMetricBuilderSheet> {
                   spacing: AppSpacing.small,
                   runSpacing: AppSpacing.small,
                   children: [
-                    _scaleIconChip(ScaleIcon.flame, Icons.local_fire_department, 'Flame'),
+                    _scaleIconChip(
+                      ScaleIcon.flame,
+                      Icons.local_fire_department,
+                      'Flame',
+                    ),
                     _scaleIconChip(ScaleIcon.star, Icons.star, 'Star'),
                     _scaleIconChip(ScaleIcon.dot, Icons.circle, 'Dot'),
                     _scaleIconChip(ScaleIcon.heart, Icons.favorite, 'Heart'),
@@ -177,7 +221,10 @@ class _CustomMetricBuilderSheetState extends State<CustomMetricBuilderSheet> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text('Classes (worst to best)', style: AppText.label),
-                    TextButton(onPressed: _useMoodPreset, child: const Text('Use Mood preset')),
+                    TextButton(
+                      onPressed: _useMoodPreset,
+                      child: const Text('Use Mood preset'),
+                    ),
                   ],
                 ),
                 const SizedBox(height: AppSpacing.small),
@@ -190,18 +237,23 @@ class _CustomMetricBuilderSheetState extends State<CustomMetricBuilderSheet> {
                           child: TextField(
                             controller: _classControllers[i],
                             style: AppText.bodyText,
-                            decoration: InputDecoration(labelText: 'Class ${i + 1}'),
+                            decoration: InputDecoration(
+                              labelText: 'Class ${i + 1}',
+                            ),
                           ),
                         ),
                         IconButton(
-                          icon: const Icon(Icons.remove_circle_outline, size: 18),
+                          icon: const Icon(
+                            Icons.remove_circle_outline,
+                            size: 18,
+                          ),
                           color: AppColors.textSecondary,
                           onPressed: _classControllers.length <= 2
                               ? null
                               : () => setState(() {
-                                    _classControllers[i].dispose();
-                                    _classControllers.removeAt(i);
-                                  }),
+                                  _classControllers[i].dispose();
+                                  _classControllers.removeAt(i);
+                                }),
                         ),
                       ],
                     ),
@@ -213,7 +265,9 @@ class _CustomMetricBuilderSheetState extends State<CustomMetricBuilderSheet> {
                     foregroundColor: AppColors.textPrimary,
                     minimumSize: const Size(double.infinity, 40),
                   ),
-                  onPressed: () => setState(() => _classControllers.add(TextEditingController())),
+                  onPressed: () => setState(
+                    () => _classControllers.add(TextEditingController()),
+                  ),
                   icon: const Icon(Icons.add, size: 16),
                   label: const Text('Add class'),
                 ),
@@ -224,7 +278,10 @@ class _CustomMetricBuilderSheetState extends State<CustomMetricBuilderSheet> {
                 value: _allowMultiplePerDay,
                 onChanged: (v) => setState(() => _allowMultiplePerDay = v),
                 activeThumbColor: AppColors.accent,
-                title: Text('Allow multiple entries per day', style: AppText.bodyText),
+                title: Text(
+                  'Allow multiple entries per day',
+                  style: AppText.bodyText,
+                ),
                 subtitle: Text(
                   _allowMultiplePerDay
                       ? 'Logging again today adds another entry (e.g. checking in more than once).'
@@ -241,14 +298,19 @@ class _CustomMetricBuilderSheetState extends State<CustomMetricBuilderSheet> {
                     backgroundColor: AppColors.accent,
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(AppRadius.button)),
+                      borderRadius: BorderRadius.circular(AppRadius.button),
+                    ),
                   ),
                   onPressed: _saving ? null : _save,
                   child: _saving
                       ? const SizedBox(
                           width: 20,
                           height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
                       : const Text('Save'),
                 ),
               ),

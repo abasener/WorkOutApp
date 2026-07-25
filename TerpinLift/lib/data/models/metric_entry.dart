@@ -56,6 +56,22 @@ extension SorenessRegionLabel on SorenessRegion {
   }
 }
 
+/// Which half of the day a soreness entry is for — lets logging twice a day
+/// (morning/evening) target a specific entry to correct rather than only
+/// ever appending a new one. Only ever set on soreness entries; steps/sleep
+/// never use it.
+enum SorenessTimeSlot { am, pm }
+
+extension SorenessTimeSlotKey on SorenessTimeSlot {
+  String get key => this == SorenessTimeSlot.am ? 'AM' : 'PM';
+
+  static SorenessTimeSlot? fromKey(String? key) => switch (key) {
+    'AM' => SorenessTimeSlot.am,
+    'PM' => SorenessTimeSlot.pm,
+    _ => null,
+  };
+}
+
 enum MetricType {
   steps,
   sleepHours,
@@ -213,6 +229,11 @@ class MetricEntry {
   final String? loggedAt;
   final String? notes;
 
+  /// Which half of the day this entry is for — soreness only, see
+  /// `SorenessTimeSlot`. Null for steps/sleep, and for any soreness entry
+  /// logged before this existed.
+  final SorenessTimeSlot? timeSlot;
+
   const MetricEntry({
     this.id,
     required this.date,
@@ -220,22 +241,25 @@ class MetricEntry {
     required this.value,
     this.loggedAt,
     this.notes,
+    this.timeSlot,
   });
 
   factory MetricEntry.fromMap(Map<String, dynamic> m) => MetricEntry(
-        id: m['id'] as int?,
-        date: m['date'] as String,
-        metricType: MetricTypeKey.fromKey(m['metric_type'] as String),
-        value: (m['value'] as num).toDouble(),
-        loggedAt: m['logged_at'] as String?,
-        notes: m['notes'] as String?,
-      );
+    id: m['id'] as int?,
+    date: m['date'] as String,
+    metricType: MetricTypeKey.fromKey(m['metric_type'] as String),
+    value: (m['value'] as num).toDouble(),
+    loggedAt: m['logged_at'] as String?,
+    notes: m['notes'] as String?,
+    timeSlot: SorenessTimeSlotKey.fromKey(m['time_slot'] as String?),
+  );
 
   Map<String, dynamic> toMap() => {
-        'date': date,
-        'metric_type': metricType.key,
-        'value': value,
-        'logged_at': loggedAt,
-        'notes': notes,
-      };
+    'date': date,
+    'metric_type': metricType.key,
+    'value': value,
+    'logged_at': loggedAt,
+    'notes': notes,
+    'time_slot': timeSlot?.key,
+  };
 }

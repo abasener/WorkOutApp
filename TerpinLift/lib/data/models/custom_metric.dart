@@ -50,6 +50,14 @@ class CustomMetric {
   /// checks) opts in explicitly when it's built.
   final bool allowMultiplePerDay;
 
+  /// Optional target value, `kind == number` only (see designFiles/
+  /// 05_SCREEN_metrics.md "Goals" — a `scale` metric is already bounded
+  /// 0-`scaleMax` with its own gauge, and `classes` has no numeric meaning).
+  /// Drives that metric's dashed trend-chart goal line and lets it be
+  /// picked for a "This Week" ring row, same as the weight/sleep goals in
+  /// Settings. `null` = no goal set.
+  final double? goal;
+
   const CustomMetric({
     this.id,
     required this.name,
@@ -59,33 +67,36 @@ class CustomMetric {
     this.classLabels = const [],
     required this.created,
     this.allowMultiplePerDay = false,
+    this.goal,
   });
 
   factory CustomMetric.fromMap(Map<String, dynamic> m) => CustomMetric(
-        id: m['id'] as int?,
-        name: m['name'] as String,
-        kind: CustomMetricKindKey.fromKey(m['kind'] as String),
-        scaleMax: m['scale_max'] as int?,
-        scaleIcon: m['scale_icon'] == null
-            ? null
-            : ScaleIconKey.fromKey(m['scale_icon'] as String),
-        classLabels: ((m['class_labels'] as String?) ?? '')
-            .split(',')
-            .where((s) => s.isNotEmpty)
-            .toList(),
-        created: m['created'] as String,
-        allowMultiplePerDay: (m['allow_multiple_per_day'] as int?) == 1,
-      );
+    id: m['id'] as int?,
+    name: m['name'] as String,
+    kind: CustomMetricKindKey.fromKey(m['kind'] as String),
+    scaleMax: m['scale_max'] as int?,
+    scaleIcon: m['scale_icon'] == null
+        ? null
+        : ScaleIconKey.fromKey(m['scale_icon'] as String),
+    classLabels: ((m['class_labels'] as String?) ?? '')
+        .split(',')
+        .where((s) => s.isNotEmpty)
+        .toList(),
+    created: m['created'] as String,
+    allowMultiplePerDay: (m['allow_multiple_per_day'] as int?) == 1,
+    goal: (m['goal'] as num?)?.toDouble(),
+  );
 
   Map<String, dynamic> toMap() => {
-        'name': name,
-        'kind': kind.key,
-        'scale_max': scaleMax,
-        'scale_icon': scaleIcon?.key,
-        'class_labels': classLabels.join(','),
-        'created': created,
-        'allow_multiple_per_day': allowMultiplePerDay ? 1 : 0,
-      };
+    'name': name,
+    'kind': kind.key,
+    'scale_max': scaleMax,
+    'scale_icon': scaleIcon?.key,
+    'class_labels': classLabels.join(','),
+    'created': created,
+    'allow_multiple_per_day': allowMultiplePerDay ? 1 : 0,
+    'goal': goal,
+  };
 
   /// A logged [value] as plain text, in whichever shape [kind] calls for —
   /// shared by the trend-chart y-axis, the entry-log/history sheet, and

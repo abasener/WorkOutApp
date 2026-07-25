@@ -1,3 +1,8 @@
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -25,11 +30,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late final _stepsGoalController = TextEditingController(
     text: UserProfile.stepsGoal.toString(),
   );
+  late final _weightGoalController = TextEditingController(
+    text: UserProfile.weightGoalLb == null
+        ? ''
+        : Units.displayValue(UserProfile.weightGoalLb!).toStringAsFixed(1),
+  );
+  late final _sleepGoalController = TextEditingController(
+    text: UserProfile.sleepGoalHours?.toStringAsFixed(1) ?? '',
+  );
 
   @override
   void dispose() {
     _birthYearController.dispose();
     _stepsGoalController.dispose();
+    _weightGoalController.dispose();
+    _sleepGoalController.dispose();
     super.dispose();
   }
 
@@ -46,17 +61,105 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  /// Opens the OS's native file picker — same "browse anywhere" surface
+  /// Android/iOS give every app (Drive, Downloads, email attachments
+  /// already saved locally, other cloud providers with their own picker
+  /// integration) — rather than only ever reading a fixed internal path
+  /// that only worked if you were restoring onto the exact same install
+  /// that made the export. `FileType.any` deliberately isn't narrowed to
+  /// `.xlsx`/`.json` — some cloud providers report an export's mime type
+  /// oddly, and a stricter filter risks the real file just not showing up
+  /// in the picker at all; the format is detected after reading instead.
+  ///
+  /// Dispatches to `BackupService.importFromExcel` (current export format)
+  /// or `.importFromJson` (an older export, kept importable) based on the
+  /// picked file's extension, falling back to sniffing the raw bytes
+  /// (`PK` — the zip signature every `.xlsx` starts with — vs. `{`/`[` for
+  /// JSON) if the extension is missing or unrecognized, since some cloud
+  /// providers strip or mangle extensions on the way through their picker.
   Future<void> _import() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.any,
+      withData: true,
+    );
+    if (result == null || result.files.isEmpty) return;
+
+    final picked = result.files.single;
+    Uint8List? bytes = picked.bytes;
+    if (bytes == null && picked.path != null) {
+      bytes = await File(picked.path!).readAsBytes();
+    }
+    if (bytes == null || bytes.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not read that file.')),
+      );
+      return;
+    }
+
+    // `PlatformFile.extension` is implemented as `name.split('.').last` in
+    // the installed file_picker version — it never actually returns null,
+    // even for a name with no dot at all (it just falls back to the whole
+    // name). Treating `extension == null` as the trigger for the byte-sniff
+    // fallback was therefore dead code: a file picked back from Drive/etc.
+    // whose reported name didn't literally end in `.xlsx` would silently
+    // fail detection and fall through to the JSON path. The magic-byte
+    // check is authoritative on its own, so it's just an additional signal
+    // now rather than gated behind an extension check that can't fire.
+    final extension = picked.extension?.toLowerCase();
+    final looksLikeZip =
+        bytes.length >= 2 && bytes[0] == 0x50 && bytes[1] == 0x4B;
+    final isExcel = extension == 'xlsx' || looksLikeZip;
+
+    // Import replaces each table it covers rather than merging with what's
+    // already there (see `BackupService.importFromExcel`) — there's little
+    // use for combining two datasets in an app like this, per the user's
+    // own call. Only worth warning about if there's actually something to
+    // lose; skip the interruption entirely on a fresh profile with nothing
+    // logged yet.
+    if (await BackupService.hasAnyLoggedData()) {
+      if (!mounted) return;
+      final confirmed = await _confirm(
+        title: 'Replace current data?',
+        message:
+            'Importing will erase your current data and replace it with '
+            'what\'s in this file. Export first if you want to back up '
+            'what you have now — this can\'t be undone.',
+      );
+      if (!confirmed) return;
+    }
+
     setState(() => _busy = true);
-    final ok = await BackupService.importFromFile();
+    bool imported = false;
+    String? errorMessage;
+    try {
+      if (isExcel) {
+        imported = await BackupService.importFromExcel(bytes);
+      } else {
+        imported = await BackupService.importFromJson(utf8.decode(bytes));
+      }
+    } catch (e) {
+      // Includes the raw exception rather than just a canned message —
+      // this only fires on a genuine read failure (corrupt file, or an
+      // edge case this app's own export/import round trip didn't handle),
+      // and a vague "not a valid spreadsheet" gave no way to tell those
+      // apart from the outside. Restoring after losing a phone is rare
+      // enough that a technical-looking error here is worth it if it
+      // means the next report says what actually broke.
+      errorMessage = isExcel
+          ? 'That file isn\'t readable as an export: $e'
+          : 'That file isn\'t readable as an export (not valid JSON): $e';
+    }
     setState(() => _busy = false);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
+        duration: const Duration(seconds: 10),
         content: Text(
-          ok
-              ? 'Import complete.'
-              : 'No export file found. Export first, or copy one into the app\'s documents folder.',
+          errorMessage ??
+              (imported
+                  ? 'Import complete.'
+                  : 'That file doesn\'t look like a TerrapinLift export.'),
         ),
       ),
     );
@@ -143,6 +246,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// dismissed, no feedback either way beyond the dialog closing — a normal
   /// user long-pressing a button by accident should see nothing happen.
   Future<void> _promptDevCode() async {
+    // Deliberately never disposed — this controller only ever backs the one
+    // TextField inside the dialog below, and disposing it right after
+    // `showDialog` resolves races the dialog's own exit-transition
+    // animation (the TextField can still be mounted/rebuilding for a few
+    // more frames while it animates out), which is exactly what caused
+    // "A TextEditingController was used after being disposed" on-device.
+    // A short-lived, one-off controller like this is a negligible resource
+    // to just leave for the garbage collector.
     final controller = TextEditingController();
     final entered = await showDialog<String>(
       context: context,
@@ -171,7 +282,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ],
       ),
     );
-    controller.dispose();
     if (entered == null || entered.trim() != '24') return;
     await AppServices.setDevMode(true);
     if (!mounted) return;
@@ -259,6 +369,45 @@ class _SettingsScreenState extends State<SettingsScreen> {
       return;
     }
     await AppServices.setStepsGoal(goal);
+    setState(() {});
+  }
+
+  /// Unlike steps, empty is a legitimate state here — clearing the field
+  /// and tapping away/submitting sets the goal back to "not set" (`null`),
+  /// no error. Only genuinely non-numeric non-empty text gets rejected.
+  Future<void> _saveWeightGoal(String text) async {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) {
+      await AppServices.setWeightGoal(null);
+      setState(() {});
+      return;
+    }
+    final entered = double.tryParse(trimmed);
+    if (entered == null || entered <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a valid weight goal.')),
+      );
+      return;
+    }
+    await AppServices.setWeightGoal(Units.toLb(entered));
+    setState(() {});
+  }
+
+  Future<void> _saveSleepGoal(String text) async {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) {
+      await AppServices.setSleepGoal(null);
+      setState(() {});
+      return;
+    }
+    final entered = double.tryParse(trimmed);
+    if (entered == null || entered <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a valid sleep goal.')),
+      );
+      return;
+    }
+    await AppServices.setSleepGoal(entered);
     setState(() {});
   }
 
@@ -365,21 +514,83 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Text('Goals', style: AppText.subHeader),
           const SizedBox(height: AppSpacing.standard),
           AppCard(
-            child: Row(
+            child: Column(
               children: [
-                Expanded(child: Text('Steps goal', style: AppText.bodyText)),
-                SizedBox(
-                  width: 90,
-                  child: TextField(
-                    controller: _stepsGoalController,
-                    keyboardType: TextInputType.number,
-                    textAlign: TextAlign.center,
-                    style: AppText.bodyText,
-                    decoration: const InputDecoration(hintText: 'e.g. 10000'),
-                    onSubmitted: _saveStepsGoal,
-                    onTapOutside: (_) =>
-                        _saveStepsGoal(_stepsGoalController.text),
-                  ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text('Steps goal', style: AppText.bodyText),
+                    ),
+                    SizedBox(
+                      width: 90,
+                      child: TextField(
+                        controller: _stepsGoalController,
+                        keyboardType: TextInputType.number,
+                        textAlign: TextAlign.center,
+                        style: AppText.bodyText,
+                        decoration: const InputDecoration(
+                          hintText: 'e.g. 10000',
+                        ),
+                        onSubmitted: _saveStepsGoal,
+                        onTapOutside: (_) =>
+                            _saveStepsGoal(_stepsGoalController.text),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.standard),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Weight goal (${Units.suffix})',
+                        style: AppText.bodyText,
+                      ),
+                    ),
+                    SizedBox(
+                      width: 90,
+                      child: TextField(
+                        controller: _weightGoalController,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        textAlign: TextAlign.center,
+                        style: AppText.bodyText,
+                        decoration: const InputDecoration(hintText: 'none'),
+                        onSubmitted: _saveWeightGoal,
+                        onTapOutside: (_) =>
+                            _saveWeightGoal(_weightGoalController.text),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.standard),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text('Sleep goal (hrs)', style: AppText.bodyText),
+                    ),
+                    SizedBox(
+                      width: 90,
+                      child: TextField(
+                        controller: _sleepGoalController,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        textAlign: TextAlign.center,
+                        style: AppText.bodyText,
+                        decoration: const InputDecoration(hintText: 'none'),
+                        onSubmitted: _saveSleepGoal,
+                        onTapOutside: (_) =>
+                            _saveSleepGoal(_sleepGoalController.text),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.small),
+                Text(
+                  'Leave weight/sleep blank for no goal — steps always has one.',
+                  style: AppText.smallText,
                 ),
               ],
             ),
@@ -394,8 +605,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Text('Export data', style: AppText.bodyText),
                 const SizedBox(height: AppSpacing.micro),
                 Text(
-                  'Writes a JSON snapshot of everything logged to the app\'s '
-                  'documents folder.',
+                  'Writes an Excel spreadsheet of everything logged, one '
+                  'sheet per table, and opens the share sheet so you can '
+                  'save it to Drive, email it, or send it wherever you '
+                  'want it to live.',
                   style: AppText.smallText,
                 ),
                 const SizedBox(height: AppSpacing.standard),
@@ -421,8 +634,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Text('Import data', style: AppText.bodyText),
                 const SizedBox(height: AppSpacing.micro),
                 Text(
-                  'Restores from the exported JSON file. Intended for a fresh '
-                  'install, not merging with existing data.',
+                  'Pick an exported file from anywhere, Drive, Downloads, an '
+                  'email attachment, wherever you saved it. Works with the '
+                  'current spreadsheet export, or an older one if that\'s '
+                  'what you have. Replaces your current data with what\'s '
+                  'in the file — export first if you want to keep a copy '
+                  'of what you have now.',
                   style: AppText.smallText,
                 ),
                 const SizedBox(height: AppSpacing.standard),

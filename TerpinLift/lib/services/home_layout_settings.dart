@@ -75,35 +75,64 @@ extension HomeWidgetIdKey on HomeWidgetId {
 }
 
 /// One placed instance of a Home section. Every type appears at most once
-/// **except** `strengthTrends` and `metricTrend`, which are repeatable
-/// "one card per thing" widgets — `exerciseId` (strengthTrends) or
-/// `metricRef` (metricTrend) says which lift/metric a given instance
-/// tracks, and both are `null` for every other (single-instance) type.
+/// **except** `strengthTrends`, `metricTrend`, and `weekRings`, which are
+/// repeatable "one card per thing" widgets — `exerciseId` (strengthTrends)
+/// or `metricRef` (metricTrend/weekRings) says which lift/metric a given
+/// instance tracks, and both are `null` for every other (single-instance)
+/// type. A `weekRings` item with `metricRef == null` means steps — the
+/// original, pre-repeatable meaning, preserved so an existing saved layout
+/// with a bare `weekRings` token keeps meaning exactly what it always did.
 class HomeLayoutItem {
   final HomeWidgetId type;
   final int? exerciseId;
   final String? metricRef;
 
-  const HomeLayoutItem(this.type, {this.exerciseId, this.metricRef});
+  /// `metricTrend` only — whether that metric's optional goal (see
+  /// designFiles/05_SCREEN_metrics.md "Goals") draws as a dashed line on
+  /// this specific card. Per-card, not per-metric: the same metric could
+  /// appear on more than one card with the line shown on one and not the
+  /// other. Meaningless (always `false`) for every other type.
+  final bool showGoal;
 
-  /// Persisted form — `<type>`, `<type>:<exerciseId>`, or `<type>:<metricRef>`.
+  const HomeLayoutItem(
+    this.type, {
+    this.exerciseId,
+    this.metricRef,
+    this.showGoal = false,
+  });
+
+  /// Persisted form — `<type>`, `<type>:<exerciseId>`, `<type>:<metricRef>`,
+  /// or `<type>:<metricRef>:goal`. `metricRef` itself can contain a colon
+  /// (a custom metric's ref is `custom:<id>`), so only a trailing `:goal`
+  /// is ever stripped/appended — never a blind colon-split.
   String get token {
     if (exerciseId != null) return '${type.key}:$exerciseId';
-    if (metricRef != null) return '${type.key}:$metricRef';
+    if (metricRef != null) {
+      final base = '${type.key}:$metricRef';
+      return showGoal ? '$base:goal' : base;
+    }
     return type.key;
   }
 
   static HomeLayoutItem? fromToken(String raw) {
     final i = raw.indexOf(':');
     final typeKey = i == -1 ? raw : raw.substring(0, i);
-    final rest = i == -1 ? null : raw.substring(i + 1);
+    var rest = i == -1 ? null : raw.substring(i + 1);
     final type = HomeWidgetIdKey.fromKey(typeKey);
     if (type == null) return null;
     if (type == HomeWidgetId.strengthTrends) {
-      return HomeLayoutItem(type, exerciseId: rest == null ? null : int.tryParse(rest));
+      return HomeLayoutItem(
+        type,
+        exerciseId: rest == null ? null : int.tryParse(rest),
+      );
     }
-    if (type == HomeWidgetId.metricTrend) {
-      return HomeLayoutItem(type, metricRef: rest);
+    if (type == HomeWidgetId.metricTrend || type == HomeWidgetId.weekRings) {
+      var showGoal = false;
+      if (rest != null && rest.endsWith(':goal')) {
+        showGoal = true;
+        rest = rest.substring(0, rest.length - ':goal'.length);
+      }
+      return HomeLayoutItem(type, metricRef: rest, showGoal: showGoal);
     }
     return HomeLayoutItem(type);
   }
@@ -113,10 +142,11 @@ class HomeLayoutItem {
       other is HomeLayoutItem &&
       other.type == type &&
       other.exerciseId == exerciseId &&
-      other.metricRef == metricRef;
+      other.metricRef == metricRef &&
+      other.showGoal == showGoal;
 
   @override
-  int get hashCode => Object.hash(type, exerciseId, metricRef);
+  int get hashCode => Object.hash(type, exerciseId, metricRef, showGoal);
 }
 
 /// Home screen's section order/visibility — an ordered list of the

@@ -50,7 +50,7 @@ class _MetricsScreenState extends State<MetricsScreen>
   List<MetricEntry> _allMetrics = [];
   List<BodyweightEntry> _bodyweight = [];
   int _cycleFlowDaysCount = 0;
-  final Map<SorenessRegion, int> _latestSoreness = {};
+  final Map<SorenessRegion, double> _latestSoreness = {};
   Map<String, double> _workoutDurationByDate = {};
   List<ProgressPhoto> _progressPhotos = [];
   List<CustomMetric> _customMetrics = [];
@@ -90,12 +90,17 @@ class _MetricsScreenState extends State<MetricsScreen>
       plannedSessions: plannedSessions,
     );
 
-    final soreness = <SorenessRegion, int>{};
+    // The current (decayed) picture, whether or not anything was logged
+    // today — same `effectiveSorenessLevel` the readiness engine uses, so
+    // this card shows the same "what's actually sore right now" the heatmap
+    // reasons about, not just whatever was last typed in. The Days tab below
+    // stays raw/as-logged on purpose — that view's job is "what did I
+    // actually report," not "what's the current estimate."
+    final soreness = <SorenessRegion, double>{};
     for (final region in MuscleMap.sorenessRegionGroups.keys) {
-      final latest = await AppServices.metrics.getLatest(
-        MetricTypeKey.forSorenessRegion(region),
+      soreness[region] = await AppServices.metrics.effectiveSorenessLevel(
+        region,
       );
-      if (latest != null) soreness[region] = latest.value.round();
     }
 
     final progressPhotos = await AppServices.progressPhotos.getAll();
@@ -200,25 +205,40 @@ class _MetricsScreenState extends State<MetricsScreen>
       )
       .toList();
 
-  /// Same per-day region grouping the Days tab uses for soreness, just
+  String _sorenessTagLabel(MetricEntry e) =>
+      '${e.metricType.sorenessRegion!.label} (${e.value.round()})';
+
+  /// Groups every logged soreness entry by `(date, slot)` — **not** just by
+  /// date — so an AM log and a PM log on the same date become two separate
+  /// groups. This is what makes "edit the PM one" and "edit the AM one"
+  /// actually distinct actions instead of both landing on whichever slot the
+  /// edit form happened to default to. Legacy entries logged before the
+  /// AM/PM feature existed (`timeSlot == null`) get their own group per
+  /// date too, kept apart from any real AM/PM groups on that same date.
+  List<_SorenessGroup> _sorenessGroupedBySlot() {
+    final byKey = <String, _SorenessGroup>{};
+    for (final e in _allMetrics) {
+      if (e.metricType.sorenessRegion == null) continue;
+      final key = '${e.date}|${e.timeSlot?.key ?? ''}';
+      byKey
+          .putIfAbsent(key, () => _SorenessGroup(e.date, e.timeSlot))
+          .entries
+          .add(e);
+    }
+    return byKey.values.toList();
+  }
+
+  /// Same per-`(date, slot)` grouping the Days tab uses for soreness, just
   /// rendered as this metric's own popup instead of mixed in with everything
   /// else logged that day.
   List<MetricHistoryRow> _sorenessHistoryRows() {
-    final byDate = <String, List<MetricEntry>>{};
-    for (final e in _allMetrics) {
-      if (e.metricType.sorenessRegion != null) {
-        byDate.putIfAbsent(e.date, () => []).add(e);
-      }
-    }
-    return byDate.entries
+    return _sorenessGroupedBySlot()
         .map(
-          (entry) => MetricHistoryRow(
-            date: entry.key,
-            tags: [
-              for (final e in entry.value)
-                '${e.metricType.sorenessRegion!.label} (${e.value.round()})',
-            ],
-            onEdit: () => _editSorenessDay(entry.key),
+          (g) => MetricHistoryRow(
+            date: g.date,
+            valueText: g.slot?.key,
+            tags: [for (final e in g.entries) _sorenessTagLabel(e)],
+            onEdit: () => _editSorenessDay(g.date, g.slot),
           ),
         )
         .toList();
@@ -258,13 +278,21 @@ class _MetricsScreenState extends State<MetricsScreen>
 
   /// Opens the full body-map sheet pre-set to this day, so every region
   /// touched that day can be edited part-by-part in one place, rather than
-  /// a separate dialog per region.
-  Future<void> _editSorenessDay(String date) async {
+  /// a separate dialog per region. [slot] pins the form to the exact AM/PM
+  /// entry this row represents — without it, the form would fall back to
+  /// its own default (AM) regardless of which slot was actually tapped,
+  /// which is exactly the bug this fixes: editing "the PM one" needs to
+  /// actually open the PM one, not silently land on a different, possibly
+  /// empty slot. `null` for a legacy pre-AM/PM entry — nothing to pin to.
+  Future<void> _editSorenessDay(String date, SorenessTimeSlot? slot) async {
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => SorenessBodyMapForm(initialDate: DateTime.parse(date)),
+      builder: (_) => SorenessBodyMapForm(
+        initialDate: DateTime.parse(date),
+        initialSlot: slot,
+      ),
     );
   }
 
@@ -330,6 +358,62 @@ class _MetricsScreenState extends State<MetricsScreen>
       builder: (_) =>
           CustomMetricEntrySheet(metric: metric, editingEntry: entry),
     );
+  }
+
+  /// Editing an existing custom metric's definition doesn't exist as a
+  /// general feature (kind/scaleMax/classLabels aren't safe to change once
+  /// real entries exist) — this is a narrow, single-field exception for the
+  /// one thing that is safe to change anytime: the optional goal. Blank
+  /// clears it, same "empty is legitimate" convention as the Settings
+  /// weight/sleep goal fields.
+  Future<void> _editCustomMetricGoal(CustomMetric metric) async {
+    final controller = TextEditingController(
+      text: metric.goal == null ? '' : metric.formatValue(metric.goal!),
+    );
+    final entered = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surfaceRaised,
+        title: Text('Goal for ${metric.name}', style: AppText.subHeader),
+        content: TextField(
+          controller: controller,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          autofocus: true,
+          style: AppText.bodyText,
+          decoration: const InputDecoration(hintText: 'Leave blank for none'),
+          onSubmitted: (v) => Navigator.pop(ctx, v),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('Cancel', style: AppText.bodyText),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, controller.text),
+            child: const Text(
+              'Save',
+              style: TextStyle(color: AppColors.accent),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (entered == null) return;
+    final trimmed = entered.trim();
+    await AppServices.customMetrics.updateDefinition(
+      CustomMetric(
+        id: metric.id,
+        name: metric.name,
+        kind: metric.kind,
+        scaleMax: metric.scaleMax,
+        scaleIcon: metric.scaleIcon,
+        classLabels: metric.classLabels,
+        created: metric.created,
+        allowMultiplePerDay: metric.allowMultiplePerDay,
+        goal: trimmed.isEmpty ? null : double.tryParse(trimmed),
+      ),
+    );
+    AppServices.signalReload();
   }
 
   Future<void> _deleteCustomMetric(CustomMetric metric) async {
@@ -782,6 +866,12 @@ class _MetricsScreenState extends State<MetricsScreen>
                 size: 20,
                 onTap: () => _viewCustomMetricHistory(metric),
               ),
+              if (metric.kind == CustomMetricKind.number)
+                TapIcon(
+                  icon: metric.goal == null ? Icons.outlined_flag : Icons.flag,
+                  size: 20,
+                  onTap: () => _editCustomMetricGoal(metric),
+                ),
               TapIcon(
                 icon: Icons.add_circle_outline,
                 size: 20,
@@ -923,31 +1013,24 @@ class _MetricsScreenState extends State<MetricsScreen>
       );
     }
 
-    // All soreness entries for a day collapse into one row (tag per region
-    // touched that day) — tapping it reopens the full body-map sheet so
-    // every region can be edited at once, rather than one row per region.
-    final sorenessByDate = <String, List<MetricEntry>>{};
-    for (final e in _allMetrics) {
-      if (e.metricType.sorenessRegion != null) {
-        sorenessByDate.putIfAbsent(e.date, () => []).add(e);
-      }
-    }
-    for (final entry in sorenessByDate.entries) {
-      final date = entry.key;
-      final regions = {
-        for (final e in entry.value) e.metricType.sorenessRegion!.label,
-      };
-      final latestLoggedAt = entry.value
+    // A separate row per (date, slot) — an AM log and a PM log on the same
+    // date are two different rows, each editable independently, rather than
+    // one row mixing both together. This is the Days tab's whole point:
+    // what was actually reported, as reported — no decay, no carrying a
+    // value forward from another day (that's what the Overview soreness
+    // card is for instead).
+    for (final g in _sorenessGroupedBySlot()) {
+      final latestLoggedAt = g.entries
           .map((e) => e.loggedAt ?? e.date)
           .reduce((a, b) => a.compareTo(b) > 0 ? a : b);
       rows.add(
         _DayRow(
-          date: date,
+          date: g.date,
           sortKey: latestLoggedAt,
           icon: Icons.local_fire_department,
-          label: 'Soreness',
-          tags: regions.toList(),
-          onEdit: () => _editSorenessDay(date),
+          label: g.slot == null ? 'Soreness' : 'Soreness (${g.slot!.key})',
+          tags: [for (final e in g.entries) _sorenessTagLabel(e)],
+          onEdit: () => _editSorenessDay(g.date, g.slot),
         ),
       );
     }
@@ -1051,6 +1134,15 @@ class _MetricsScreenState extends State<MetricsScreen>
       ],
     );
   }
+}
+
+/// One `(date, slot)` bucket of soreness entries — see
+/// `_MetricsScreenState._sorenessGroupedBySlot`.
+class _SorenessGroup {
+  final String date;
+  final SorenessTimeSlot? slot;
+  final List<MetricEntry> entries = [];
+  _SorenessGroup(this.date, this.slot);
 }
 
 class _DayRow {

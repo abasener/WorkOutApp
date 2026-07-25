@@ -43,6 +43,11 @@ class CenteredTrendChart extends StatelessWidget {
   /// Width:height ratio, e.g. 2.0 = twice as wide as it is tall.
   final double aspectRatio;
 
+  /// Optional dashed horizontal reference line at this value — see
+  /// `_ChartPainter` for how it folds into the y-axis domain. `null` draws
+  /// nothing (the common case; most charts have no goal).
+  final double? goal;
+
   const CenteredTrendChart({
     super.key,
     required this.points,
@@ -52,6 +57,7 @@ class CenteredTrendChart extends StatelessWidget {
     this.trendWindowDays = 21,
     this.yLabelFormatter,
     this.aspectRatio = 2.0,
+    this.goal,
   });
 
   @override
@@ -67,6 +73,7 @@ class CenteredTrendChart extends StatelessWidget {
           trendWindowDays: trendWindowDays,
           yLabelFormatter: yLabelFormatter,
           height: chartHeight,
+          goal: goal,
         );
       },
     );
@@ -116,6 +123,11 @@ class LabeledTrendChart extends StatelessWidget {
   /// for [TrendStyle.polynomial].
   final double trendWindowDays;
 
+  /// Optional dashed horizontal reference line at this value — see
+  /// `_ChartPainter` for how it folds into the y-axis domain. `null` draws
+  /// nothing (the common case; most charts have no goal).
+  final double? goal;
+
   const LabeledTrendChart({
     super.key,
     required this.points,
@@ -125,6 +137,7 @@ class LabeledTrendChart extends StatelessWidget {
     this.yLabelFormatter,
     this.trendStyle = TrendStyle.movingAverage,
     this.trendWindowDays = 21,
+    this.goal,
   });
 
   @override
@@ -155,6 +168,7 @@ class LabeledTrendChart extends StatelessWidget {
             yLabelFormatter: yLabelFormatter ?? (v) => v.round().toString(),
             trendStyle: trendStyle,
             trendWindowDays: trendWindowDays,
+            goal: goal,
           ),
         ),
       ),
@@ -169,6 +183,7 @@ class _ChartPainter extends CustomPainter {
   final String Function(double) yLabelFormatter;
   final TrendStyle trendStyle;
   final double trendWindowDays;
+  final double? goal;
 
   _ChartPainter({
     required this.points,
@@ -177,6 +192,7 @@ class _ChartPainter extends CustomPainter {
     required this.yLabelFormatter,
     required this.trendStyle,
     required this.trendWindowDays,
+    this.goal,
   });
 
   static const _leftPad = 34.0;
@@ -198,14 +214,21 @@ class _ChartPainter extends CustomPainter {
 
     final firstDate = points.first.date;
     final lastDate = points.last.date;
-    final dataSpanDays =
-        lastDate.difference(firstDate).inDays.toDouble().clamp(1.0, double.infinity);
+    final dataSpanDays = lastDate
+        .difference(firstDate)
+        .inDays
+        .toDouble()
+        .clamp(1.0, double.infinity);
     final totalSpanDays = showPrediction ? dataSpanDays / 0.75 : dataSpanDays;
 
-    double xOfDays(double days) => _leftPad + (days / totalSpanDays) * plotWidth;
-    double xOf(DateTime d) => xOfDays(d.difference(firstDate).inDays.toDouble());
+    double xOfDays(double days) =>
+        _leftPad + (days / totalSpanDays) * plotWidth;
+    double xOf(DateTime d) =>
+        xOfDays(d.difference(firstDate).inDays.toDouble());
 
-    final xs = points.map((p) => p.date.difference(firstDate).inDays.toDouble()).toList();
+    final xs = points
+        .map((p) => p.date.difference(firstDate).inDays.toDouble())
+        .toList();
     final ys = points.map((p) => p.value).toList();
     // Fit the trend line's shape on `trendValue` when provided (e.g. e1RM,
     // comparable across different rep counts), falling back to `value`
@@ -219,7 +242,7 @@ class _ChartPainter extends CustomPainter {
     // point supplies a `trendValue`.
     final shift = points.any((p) => p.trendValue != null)
         ? (ys.reduce((a, b) => a + b) / ys.length) -
-            (trendYs.reduce((a, b) => a + b) / trendYs.length)
+              (trendYs.reduce((a, b) => a + b) / trendYs.length)
         : 0.0;
 
     // Trend curve: a list of (x, y) samples to connect with dashed segments
@@ -230,9 +253,12 @@ class _ChartPainter extends CustomPainter {
     switch (trendStyle) {
       case TrendStyle.movingAverage:
         final smoothed = _trailingMovingAverage(xs, trendYs, trendWindowDays);
-        trendCurve = [for (var i = 0; i < xs.length; i++) (xs[i], smoothed[i] + shift)];
+        trendCurve = [
+          for (var i = 0; i < xs.length; i++) (xs[i], smoothed[i] + shift),
+        ];
         final slope = _trailingSlope(xs, smoothed, trendWindowDays);
-        predictedEndValue = smoothed.last + slope * (totalSpanDays - xs.last) + shift;
+        predictedEndValue =
+            smoothed.last + slope * (totalSpanDays - xs.last) + shift;
       case TrendStyle.polynomial:
         final coeffs = _fitBestPolynomial(xs, trendYs);
         double curveAt(double x) => _evalPoly(coeffs, x);
@@ -246,7 +272,8 @@ class _ChartPainter extends CustomPainter {
             ),
         ];
         final tangentSlope = derivativeAt(xs.last);
-        predictedEndValue = curveAt(xs.last) + tangentSlope * (totalSpanDays - xs.last) + shift;
+        predictedEndValue =
+            curveAt(xs.last) + tangentSlope * (totalSpanDays - xs.last) + shift;
     }
 
     // Domain is based on the actual logged data only — NOT the trend curve or
@@ -260,6 +287,15 @@ class _ChartPainter extends CustomPainter {
     if ((maxV - minV).abs() < 1e-6) {
       maxV += 1;
       minV -= 1;
+    }
+    // A goal outside the data's own range should be thought of as a data
+    // point too, per the user's own framing — expand the domain to include
+    // it before padding runs, so it stays proportionally padded/centered
+    // like real data would rather than clipped at the very edge. A goal
+    // already inside [minV, maxV] changes nothing.
+    if (goal != null) {
+      if (goal! < minV) minV = goal!;
+      if (goal! > maxV) maxV = goal!;
     }
     final pad = (maxV - minV) * ((1 / _dataFillFraction - 1) / 2);
     minV -= pad;
@@ -285,6 +321,18 @@ class _ChartPainter extends CustomPainter {
           ..strokeWidth = 1,
       );
       _drawText(canvas, yLabelFormatter(v), Offset(0, y - 6), 10);
+    }
+
+    // Optional goal line — a distinct color from both the border gridlines
+    // and the grey trend curve so it reads as its own thing, not a third
+    // flavor of either.
+    if (goal != null) {
+      _drawDashedLine(
+        canvas,
+        Offset(_leftPad, yOf(goal!)),
+        Offset(size.width - _rightPad, yOf(goal!)),
+        AppColors.good,
+      );
     }
 
     // X-axis labels, evenly spaced across the full (possibly extended) domain.
@@ -339,7 +387,11 @@ class _ChartPainter extends CustomPainter {
         ..strokeCap = StrokeCap.round,
     );
     for (final p in points) {
-      canvas.drawCircle(Offset(xOf(p.date), yOf(p.value)), _dotRadius(p.reps), Paint()..color = color);
+      canvas.drawCircle(
+        Offset(xOf(p.date), yOf(p.value)),
+        _dotRadius(p.reps),
+        Paint()..color = color,
+      );
     }
   }
 
@@ -358,7 +410,11 @@ class _ChartPainter extends CustomPainter {
   /// Trailing moving average: at each point i, the mean of all points whose
   /// x falls within [x_i - window, x_i]. Naturally uses a smaller effective
   /// window near the start of the series where less history exists yet.
-  List<double> _trailingMovingAverage(List<double> xs, List<double> ys, double window) {
+  List<double> _trailingMovingAverage(
+    List<double> xs,
+    List<double> ys,
+    double window,
+  ) {
     final result = <double>[];
     for (var i = 0; i < xs.length; i++) {
       final target = xs[i];
@@ -401,7 +457,9 @@ class _ChartPainter extends CustomPainter {
   List<double> _fitBestPolynomial(List<double> xs, List<double> ys) {
     final n = xs.length;
     final meanY = ys.reduce((a, b) => a + b) / n;
-    final ssTot = ys.map((y) => (y - meanY) * (y - meanY)).reduce((a, b) => a + b);
+    final ssTot = ys
+        .map((y) => (y - meanY) * (y - meanY))
+        .reduce((a, b) => a + b);
 
     final degreeCap = ((n / _pointsPerCoeff) - 1).floor().clamp(1, _maxDegree);
     if (degreeCap < _minDegree) {
@@ -414,9 +472,10 @@ class _ChartPainter extends CustomPainter {
     for (var degree = _minDegree; degree <= degreeCap; degree++) {
       final coeffs = _fitPolynomial(xs, ys, degree);
       if (coeffs == null) continue; // degenerate system, skip this degree
-      final ssRes = List.generate(n, (i) => ys[i] - _evalPoly(coeffs, xs[i]))
-          .map((e) => e * e)
-          .reduce((a, b) => a + b);
+      final ssRes = List.generate(
+        n,
+        (i) => ys[i] - _evalPoly(coeffs, xs[i]),
+      ).map((e) => e * e).reduce((a, b) => a + b);
       final r2 = ssTot < 1e-9 ? 1.0 : 1 - ssRes / ssTot;
       if (r2 > bestR2) {
         bestR2 = r2;
@@ -459,7 +518,9 @@ class _ChartPainter extends CustomPainter {
   /// Gaussian elimination with partial pivoting for an NxN+1 augmented matrix.
   List<double>? _solveLinearSystem(List<List<double>> m) {
     final size = m.length;
-    final a = [for (final row in m) [...row]];
+    final a = [
+      for (final row in m) [...row],
+    ];
     for (var col = 0; col < size; col++) {
       var pivot = col;
       for (var row = col + 1; row < size; row++) {
@@ -524,7 +585,8 @@ class _ChartPainter extends CustomPainter {
     var traveled = 0.0;
     while (traveled < totalLength) {
       final segStart = start + direction * traveled;
-      final segEnd = start + direction * (traveled + dashLength).clamp(0, totalLength);
+      final segEnd =
+          start + direction * (traveled + dashLength).clamp(0, totalLength);
       canvas.drawLine(segStart, segEnd, paint);
       traveled += dashLength + gapLength;
     }
@@ -536,5 +598,6 @@ class _ChartPainter extends CustomPainter {
       old.showPrediction != showPrediction ||
       old.color != color ||
       old.trendStyle != trendStyle ||
-      old.trendWindowDays != trendWindowDays;
+      old.trendWindowDays != trendWindowDays ||
+      old.goal != goal;
 }
