@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../../data/models/custom_metric.dart';
+import '../../services/home_layout_settings.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/time_frame_dropdown.dart';
 
 class MetricTrendOption {
   final String ref;
@@ -28,16 +30,21 @@ class MetricTrendOption {
   ];
 }
 
-/// Picks which single metric a Metric Trend card tracks, plus the shared
-/// "how far back" months setting (same global setting Strength Trend cards
-/// use — one "months of history" knob for every Home trend card), and
-/// (designFiles/05_SCREEN_metrics.md "Goals") whether this specific card
-/// draws that metric's dashed goal line, if it has one. Reached per-card and
-/// only from Home's edit mode.
+/// Picks which single metric a Metric Trend card tracks, its own title and
+/// time-frame overrides, and (designFiles/05_SCREEN_metrics.md "Goals")
+/// whether this specific card draws that metric's dashed goal line, if it
+/// has one. Reached per-card and only from Home's edit mode.
 class MetricTrendEditSheet extends StatefulWidget {
   final List<MetricTrendOption> options;
   final String? selectedRef;
-  final int months;
+
+  /// Refs already tracked by another Metric Trend card — no longer excluded
+  /// from `options` (2026-07-26, duplicates are allowed, same as This Week),
+  /// just dimmed so it's still obvious which ones already have a card.
+  final Set<String> alreadyUsedRefs;
+  final String defaultTitle;
+  final String? currentTitle;
+  final int? monthsOverride;
   final bool showGoal;
 
   /// Only refs with an actual goal value set — steps always has one;
@@ -50,7 +57,10 @@ class MetricTrendEditSheet extends StatefulWidget {
     super.key,
     required this.options,
     required this.selectedRef,
-    required this.months,
+    required this.alreadyUsedRefs,
+    required this.defaultTitle,
+    required this.currentTitle,
+    required this.monthsOverride,
     required this.showGoal,
     required this.goalsByRef,
   });
@@ -62,8 +72,9 @@ class MetricTrendEditSheet extends StatefulWidget {
 class _MetricTrendEditSheetState extends State<MetricTrendEditSheet> {
   String? _selected;
   late bool _showGoal;
-  late final _monthsController = TextEditingController(
-    text: widget.months.toString(),
+  late int _months = widget.monthsOverride ?? 0;
+  late final _titleController = TextEditingController(
+    text: widget.currentTitle ?? '',
   );
 
   @override
@@ -75,18 +86,20 @@ class _MetricTrendEditSheetState extends State<MetricTrendEditSheet> {
 
   @override
   void dispose() {
-    _monthsController.dispose();
+    _titleController.dispose();
     super.dispose();
   }
 
   void _save() {
     final selected = _selected;
     if (selected == null) return;
-    final months = int.tryParse(_monthsController.text) ?? widget.months;
     final hasGoal = widget.goalsByRef.containsKey(selected);
+    // Title popped verbatim (may be ''); the caller resolves what that means
+    // against `HomeLayoutItem.title`'s tri-state (see `_HomeScreenState._resolveTitle`).
     Navigator.pop(context, (
       selected,
-      months.clamp(1, 999),
+      _titleController.text.trim(),
+      _months == 0 ? null : _months,
       hasGoal && _showGoal,
     ));
   }
@@ -147,60 +160,55 @@ class _MetricTrendEditSheetState extends State<MetricTrendEditSheet> {
           children: [
             Text('Metric Trend', style: AppText.subHeader),
             const SizedBox(height: AppSpacing.standard),
-            Row(
-              children: [
-                Expanded(
-                  child: Text('Months of history', style: AppText.bodyText),
-                ),
-                SizedBox(
-                  width: 70,
-                  child: TextField(
-                    controller: _monthsController,
-                    keyboardType: TextInputType.number,
-                    textAlign: TextAlign.center,
-                    style: AppText.bodyText,
-                  ),
-                ),
-              ],
-            ),
+            Text('Title', style: AppText.label),
             const SizedBox(height: AppSpacing.small),
-            Text(
-              'Applies to every trend card on Home, not just this one.',
-              style: AppText.smallText,
+            TextField(
+              controller: _titleController,
+              style: AppText.bodyText,
+              maxLength: homeWidgetTitleMaxLength,
+              decoration: InputDecoration(
+                hintText: widget.defaultTitle,
+                counterText: '',
+              ),
+            ),
+            const SizedBox(height: AppSpacing.standard),
+            Text('Time frame', style: AppText.label),
+            const SizedBox(height: AppSpacing.small),
+            TimeFrameDropdown(
+              value: _months,
+              onChanged: (v) => setState(() => _months = v),
             ),
             const SizedBox(height: AppSpacing.standard),
             Text('Which metric', style: AppText.label),
             Flexible(
-              child: widget.options.isEmpty
-                  ? Padding(
-                      padding: const EdgeInsets.symmetric(
-                        vertical: AppSpacing.standard,
+              child: ListView(
+                shrinkWrap: true,
+                children: widget.options.map((o) {
+                  final selected = o.ref == _selected;
+                  // Dimmed, not excluded, when another card already tracks
+                  // this metric — still fully selectable (duplicates
+                  // allowed).
+                  final alreadyUsed =
+                      widget.alreadyUsedRefs.contains(o.ref) && !selected;
+                  return Opacity(
+                    opacity: alreadyUsed ? 0.5 : 1.0,
+                    child: ListTile(
+                      onTap: () => setState(() => _selected = o.ref),
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(o.icon, color: AppColors.textSecondary),
+                      trailing: Icon(
+                        selected
+                            ? Icons.radio_button_checked
+                            : Icons.radio_button_unchecked,
+                        color: selected
+                            ? AppColors.accent
+                            : AppColors.textSecondary,
                       ),
-                      child: Text(
-                        'Every metric already has a card.',
-                        style: AppText.smallText,
-                      ),
-                    )
-                  : ListView(
-                      shrinkWrap: true,
-                      children: widget.options.map((o) {
-                        final selected = o.ref == _selected;
-                        return ListTile(
-                          onTap: () => setState(() => _selected = o.ref),
-                          contentPadding: EdgeInsets.zero,
-                          leading: Icon(o.icon, color: AppColors.textSecondary),
-                          trailing: Icon(
-                            selected
-                                ? Icons.radio_button_checked
-                                : Icons.radio_button_unchecked,
-                            color: selected
-                                ? AppColors.accent
-                                : AppColors.textSecondary,
-                          ),
-                          title: Text(o.label, style: AppText.bodyText),
-                        );
-                      }).toList(),
+                      title: Text(o.label, style: AppText.bodyText),
                     ),
+                  );
+                }).toList(),
+              ),
             ),
             const SizedBox(height: AppSpacing.standard),
             _goalToggleRow(),

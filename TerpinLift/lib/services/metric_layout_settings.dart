@@ -65,6 +65,15 @@ extension MetricWidgetIdKey on MetricWidgetId {
         return Icons.show_chart;
     }
   }
+
+  /// Whether this card type is windowed by a time frame at all (steps/
+  /// sleep/weight/workoutDuration/customMetric all plot a `LabeledTrendChart`
+  /// against some history window; soreness/cycle/progressPhotos don't) —
+  /// decides whether the settings gear even has a time-frame row to show.
+  bool get hasTimeFrame =>
+      this != MetricWidgetId.soreness &&
+      this != MetricWidgetId.cycle &&
+      this != MetricWidgetId.progressPhotos;
 }
 
 /// One placed card. Every type appears at most once **except**
@@ -74,41 +83,130 @@ class MetricLayoutItem {
   final MetricWidgetId type;
   final int? customMetricId;
 
-  const MetricLayoutItem(this.type, {this.customMetricId});
+  /// Whether this card is hidden — no longer removes it from the order the
+  /// way an absent entry used to; it stays in place (still reorderable) and
+  /// renders dimmed in edit mode, full-strength when shown. Replaces the
+  /// old "hide = remove from order, show = pick from a separate popup"
+  /// scheme entirely (2026-07-25) — the only way to add a genuinely new
+  /// card now is a new custom metric (or, on Home, a new trend/ring card).
+  final bool hidden;
 
-  String get token =>
+  /// This card's own "how far back" window, in months — `null` means
+  /// "Default," which tracks `HomeTrendSettings.months` live rather than
+  /// copying its value once, so a card left on Default keeps following the
+  /// shared setting even if it changes later. Only meaningful for a type
+  /// where `hasTimeFrame` is true.
+  final int? monthsOverride;
+
+  /// Whether this card's optional goal (designFiles/05_SCREEN_metrics.md
+  /// "Goals") draws as a dashed line on its chart — same per-card idea as
+  /// `HomeLayoutItem.showGoal`. Meaningless if the underlying metric has no
+  /// goal value set.
+  final bool showGoal;
+
+  const MetricLayoutItem(
+    this.type, {
+    this.customMetricId,
+    this.hidden = false,
+    this.monthsOverride,
+    this.showGoal = false,
+  });
+
+  /// Identity independent of the mutable flags below — use this (not
+  /// `token`) for a `ReorderableListView`'s `ValueKey`. `token` now changes
+  /// whenever hidden/monthsOverride/showGoal is toggled, which would
+  /// otherwise make the list treat an in-place settings change as a
+  /// completely different item mid-interaction.
+  String get stableKey =>
       customMetricId != null ? '${type.key}:$customMetricId' : type.key;
 
+  /// Persisted form — base `<type>` or `<type>:<customMetricId>`, plus any
+  /// of `;hidden=1` / `;months=<n>` / `;goal=1` appended (any combination,
+  /// any order not required since each is parsed independently) only when
+  /// that flag differs from its default, so an untouched card's token stays
+  /// exactly what it always was.
+  String get token {
+    final base = customMetricId != null
+        ? '${type.key}:$customMetricId'
+        : type.key;
+    final flags = [
+      if (hidden) 'hidden=1',
+      if (monthsOverride != null) 'months=$monthsOverride',
+      if (showGoal) 'goal=1',
+    ];
+    return flags.isEmpty ? base : '$base;${flags.join(';')}';
+  }
+
   static MetricLayoutItem? fromToken(String raw) {
-    final i = raw.indexOf(':');
-    final typeKey = i == -1 ? raw : raw.substring(0, i);
-    final rest = i == -1 ? null : raw.substring(i + 1);
+    final parts = raw.split(';');
+    final base = parts.first;
+    final i = base.indexOf(':');
+    final typeKey = i == -1 ? base : base.substring(0, i);
+    final rest = i == -1 ? null : base.substring(i + 1);
     final type = MetricWidgetIdKey.fromKey(typeKey);
     if (type == null) return null;
-    if (type == MetricWidgetId.customMetric) {
-      return MetricLayoutItem(
-        type,
-        customMetricId: rest == null ? null : int.tryParse(rest),
-      );
+
+    var hidden = false;
+    int? monthsOverride;
+    var showGoal = false;
+    for (final flag in parts.skip(1)) {
+      if (flag == 'hidden=1') hidden = true;
+      if (flag == 'goal=1') showGoal = true;
+      if (flag.startsWith('months=')) {
+        monthsOverride = int.tryParse(flag.substring('months='.length));
+      }
     }
-    return MetricLayoutItem(type);
+
+    return MetricLayoutItem(
+      type,
+      customMetricId: type == MetricWidgetId.customMetric && rest != null
+          ? int.tryParse(rest)
+          : null,
+      hidden: hidden,
+      monthsOverride: monthsOverride,
+      showGoal: showGoal,
+    );
   }
+
+  /// `monthsOverride` needs a tri-state update (leave alone / set to a
+  /// value / clear back to Default), which a plain `newValue ?? oldValue`
+  /// copyWith can't express — wrap the new value in a function so "clear
+  /// it" can be `() => null` and "leave alone" can stay the default `null`
+  /// argument, distinguishing the two.
+  MetricLayoutItem copyWith({
+    bool? hidden,
+    int? Function()? monthsOverride,
+    bool? showGoal,
+  }) => MetricLayoutItem(
+    type,
+    customMetricId: customMetricId,
+    hidden: hidden ?? this.hidden,
+    monthsOverride: monthsOverride != null
+        ? monthsOverride()
+        : this.monthsOverride,
+    showGoal: showGoal ?? this.showGoal,
+  );
 
   @override
   bool operator ==(Object other) =>
       other is MetricLayoutItem &&
       other.type == type &&
-      other.customMetricId == customMetricId;
+      other.customMetricId == customMetricId &&
+      other.hidden == hidden &&
+      other.monthsOverride == monthsOverride &&
+      other.showGoal == showGoal;
 
   @override
-  int get hashCode => Object.hash(type, customMetricId);
+  int get hashCode =>
+      Object.hash(type, customMetricId, hidden, monthsOverride, showGoal);
 }
 
 /// Overview tab's card order/visibility — `null` means "not customized yet,"
 /// falling back to every built-in card in its original order plus one entry
 /// per existing custom metric. Hiding a card here never deletes its
 /// underlying data (logged entries, or a custom metric definition) — it's
-/// just left out of this order, same convention `HomeLayoutSettings` uses.
+/// just flagged hidden, same convention `HomeLayoutSettings` uses for
+/// deletion-safety, now via `MetricLayoutItem.hidden` rather than absence.
 abstract class MetricLayoutSettings {
   static List<MetricLayoutItem>? order;
 }

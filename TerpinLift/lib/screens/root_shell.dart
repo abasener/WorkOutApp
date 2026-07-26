@@ -19,20 +19,23 @@ class RootShell extends StatefulWidget {
 class _RootShellState extends State<RootShell> {
   int _index = 0;
 
-  static const _screens = [
-    HomeScreen(),
-    LiftsScreen(),
-    MetricsScreen(),
-    SettingsScreen(),
-  ];
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
       body: IndexedStack(
         index: _index,
-        children: _screens,
+        // Built fresh each rebuild rather than a `const` field — safe under
+        // IndexedStack, whose diffing keys off widget type/position, not
+        // object identity, so no screen's state is lost by this. Needed so
+        // HomeScreen can be told when it's no longer the active tab (see
+        // its `active` param) and auto-exit edit mode.
+        children: [
+          HomeScreen(active: _index == 0),
+          const LiftsScreen(),
+          const MetricsScreen(),
+          const SettingsScreen(),
+        ],
       ),
       floatingActionButton: FloatingActionButton(
         backgroundColor: AppColors.accent,
@@ -74,7 +77,10 @@ class _RootShellState extends State<RootShell> {
           children: [
             Icon(icon, color: color, size: 22),
             const SizedBox(height: 2),
-            Text(label, style: AppText.smallText.copyWith(color: color, fontSize: 11)),
+            Text(
+              label,
+              style: AppText.smallText.copyWith(color: color, fontSize: 11),
+            ),
           ],
         ),
       ),

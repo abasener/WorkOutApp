@@ -37,6 +37,7 @@ import '../hiit/hiit_active_screen.dart';
 import '../hiit/hiit_setup_screen.dart';
 import '../planner/active_day_screen.dart';
 import '../planner/day_select_screen.dart';
+import 'home_widget_title_sheet.dart';
 import 'metric_trend_edit_sheet.dart';
 import 'strength_trend_edit_sheet.dart';
 import 'week_rings_edit_sheet.dart';
@@ -46,7 +47,14 @@ import 'week_rings_edit_sheet.dart';
 const _defaultTrendLiftCount = 4;
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  /// Whether this is the currently-visible bottom-nav tab. `RootShell` keeps
+  /// every tab alive in an `IndexedStack`, so without this Home would stay
+  /// in edit mode forever once entered — this lets `didUpdateWidget` notice
+  /// the tab going inactive and auto-exit, rather than requiring the user to
+  /// remember to tap Done every time (designFiles/02_SCREEN_home.md).
+  final bool active;
+
+  const HomeScreen({super.key, required this.active});
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -86,6 +94,14 @@ class _HomeScreenState extends State<HomeScreen> {
     _ticker = Timer.periodic(const Duration(seconds: 30), (_) {
       if (mounted && _activeSession != null) setState(() {});
     });
+  }
+
+  @override
+  void didUpdateWidget(HomeScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.active && !widget.active) {
+      setState(() => _editing = false);
+    }
   }
 
   @override
@@ -367,26 +383,45 @@ class _HomeScreenState extends State<HomeScreen> {
     await _persistOrder(order);
   }
 
-  Future<int?> _pickLift({
-    required Set<int> excludeIds,
+  /// Toggles a card's hidden flag in place — the only way to hide/show a
+  /// single-instance widget, and one of two ways (with the trash icon) to
+  /// affect a repeatable one. Mirrors Metrics' equivalent toggle.
+  Future<void> _toggleHidden(HomeLayoutItem item) async {
+    final order = [..._currentOrder];
+    final i = order.indexOf(item);
+    if (i == -1) return;
+    order[i] = item.copyWith(hidden: !item.hidden);
+    await _persistOrder(order);
+  }
+
+  Future<(int, String, int?)?> _pickLift({
+    required Set<int> alreadyUsedIds,
     int? currentId,
-    required int months,
-  }) async {
-    final result = await showModalBottomSheet<(int, int)>(
+    required String defaultTitle,
+    String? currentTitle,
+    int? monthsOverride,
+  }) {
+    return showModalBottomSheet<(int, String, int?)>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => StrengthTrendEditSheet(
         exercises: _exercises,
         selectedId: currentId,
-        excludeIds: excludeIds,
-        months: months,
+        alreadyUsedIds: alreadyUsedIds,
+        defaultTitle: defaultTitle,
+        currentTitle: currentTitle,
+        monthsOverride: monthsOverride,
       ),
     );
-    if (result == null) return null;
-    final (exerciseId, pickedMonths) = result;
-    await AppServices.setHomeTrendMonths(pickedMonths);
-    return exerciseId;
+  }
+
+  String _strengthDefaultTitle(HomeLayoutItem item) {
+    final byId = {
+      for (final e in _exercises)
+        if (e.id != null) e.id!: e,
+    };
+    return byId[item.exerciseId]?.name ?? 'Strength Trend';
   }
 
   Future<void> _editStrengthTrend(HomeLayoutItem item) async {
@@ -396,18 +431,24 @@ class _HomeScreenState extends State<HomeScreen> {
         .map((i) => i.exerciseId)
         .whereType<int>()
         .toSet();
-    final exerciseId = await _pickLift(
-      excludeIds: usedIds,
+    final defaultTitle = _strengthDefaultTitle(item);
+    final result = await _pickLift(
+      alreadyUsedIds: usedIds,
       currentId: item.exerciseId,
-      months: HomeTrendSettings.months,
+      defaultTitle: defaultTitle,
+      currentTitle: item.title,
+      monthsOverride: item.monthsOverride,
     );
-    if (exerciseId == null) return;
+    if (result == null) return;
+    final (exerciseId, title, monthsOverride) = result;
     final newOrder = [
       for (final i in order)
         i == item
             ? HomeLayoutItem(
                 HomeWidgetId.strengthTrends,
                 exerciseId: exerciseId,
+                title: _resolveTitle(title, defaultTitle),
+                monthsOverride: monthsOverride,
               )
             : i,
     ];
@@ -434,31 +475,34 @@ class _HomeScreenState extends State<HomeScreen> {
     return map;
   }
 
-  Future<(String, bool)?> _pickMetric({
-    required Set<String> excludeRefs,
+  Future<(String, String, int?, bool)?> _pickMetric({
+    required Set<String> alreadyUsedRefs,
     String? currentRef,
-    required int months,
+    required String defaultTitle,
+    String? currentTitle,
+    int? monthsOverride,
     bool currentShowGoal = false,
-  }) async {
-    final options = MetricTrendOption.all(_customMetrics)
-        .where((o) => o.ref == currentRef || !excludeRefs.contains(o.ref))
-        .toList();
-    final result = await showModalBottomSheet<(String, int, bool)>(
+  }) {
+    return showModalBottomSheet<(String, String, int?, bool)>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => MetricTrendEditSheet(
-        options: options,
+        options: MetricTrendOption.all(_customMetrics),
         selectedRef: currentRef,
-        months: months,
+        alreadyUsedRefs: alreadyUsedRefs,
+        defaultTitle: defaultTitle,
+        currentTitle: currentTitle,
+        monthsOverride: monthsOverride,
         showGoal: currentShowGoal,
         goalsByRef: _goalsByRef(),
       ),
     );
-    if (result == null) return null;
-    final (ref, pickedMonths, showGoal) = result;
-    await AppServices.setHomeTrendMonths(pickedMonths);
-    return (ref, showGoal);
+  }
+
+  String _metricDefaultTitle(HomeLayoutItem item) {
+    return _metricTrendInfo(item.metricRef, DateTime.now())?.title ??
+        'Metric Trend';
   }
 
   Future<void> _editMetricTrend(HomeLayoutItem item) async {
@@ -468,20 +512,25 @@ class _HomeScreenState extends State<HomeScreen> {
         .map((i) => i.metricRef)
         .whereType<String>()
         .toSet();
+    final defaultTitle = _metricDefaultTitle(item);
     final result = await _pickMetric(
-      excludeRefs: usedRefs,
+      alreadyUsedRefs: usedRefs,
       currentRef: item.metricRef,
-      months: HomeTrendSettings.months,
+      defaultTitle: defaultTitle,
+      currentTitle: item.title,
+      monthsOverride: item.monthsOverride,
       currentShowGoal: item.showGoal,
     );
     if (result == null) return;
-    final (ref, showGoal) = result;
+    final (ref, title, monthsOverride, showGoal) = result;
     final newOrder = [
       for (final i in order)
         i == item
             ? HomeLayoutItem(
                 HomeWidgetId.metricTrend,
                 metricRef: ref,
+                title: _resolveTitle(title, defaultTitle),
+                monthsOverride: monthsOverride,
                 showGoal: showGoal,
               )
             : i,
@@ -489,17 +538,90 @@ class _HomeScreenState extends State<HomeScreen> {
     await _persistOrder(newOrder);
   }
 
+  String _weekRingsDefaultTitle(HomeLayoutItem item) {
+    final rings = _weekRingsInfo(item.metricRef);
+    return rings == null ? 'This Week' : 'This Week · ${rings.title}';
+  }
+
+  /// Opens the settings sheet for a single-instance widget's gear icon —
+  /// title only, since none of these types have any other per-card setting.
+  Future<void> _editSingleInstanceTitle(HomeLayoutItem item) async {
+    final order = [..._currentOrder];
+    final i = order.indexOf(item);
+    if (i == -1) return;
+    final defaultTitle = _defaultTitleFor(item);
+    // The sheet pops the raw typed text (may be '') and null only when
+    // dismissed without saving — see home_widget_title_sheet.dart.
+    final result = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => HomeWidgetTitleSheet(
+        defaultTitle: defaultTitle,
+        currentTitle: item.title,
+      ),
+    );
+    if (result == null) return;
+    order[i] = item.copyWith(title: () => _resolveTitle(result, defaultTitle));
+    await _persistOrder(order);
+  }
+
+  /// Maps a sheet's raw, verbatim-typed title text back onto
+  /// `HomeLayoutItem.title`'s tri-state: left exactly as the shown default
+  /// resolves to "not customized" (`null`, tracks the default live, even if
+  /// it changes later); anything else — including an explicitly cleared `''`
+  /// — is taken literally, so clearing the field never silently falls back
+  /// to showing the default title again.
+  String? _resolveTitle(String raw, String defaultTitle) =>
+      raw == defaultTitle ? null : raw;
+
+  Future<void> _editItem(HomeLayoutItem item) {
+    switch (item.type) {
+      case HomeWidgetId.strengthTrends:
+        return _editStrengthTrend(item);
+      case HomeWidgetId.metricTrend:
+        return _editMetricTrend(item);
+      case HomeWidgetId.weekRings:
+        return _editWeekRings(item);
+      default:
+        return _editSingleInstanceTitle(item);
+    }
+  }
+
+  String _defaultTitleFor(HomeLayoutItem item) {
+    switch (item.type) {
+      case HomeWidgetId.muscleStatus:
+        return 'Muscle Status';
+      case HomeWidgetId.planner:
+        return 'Plan a Session';
+      case HomeWidgetId.todoList:
+        return 'Checklist';
+      case HomeWidgetId.weekRings:
+        return _weekRingsDefaultTitle(item);
+      case HomeWidgetId.primedForGrowth:
+        return 'Primed for Growth';
+      case HomeWidgetId.trainingSplit:
+        return 'Training Split';
+      case HomeWidgetId.strengthTrends:
+        return _strengthDefaultTitle(item);
+      case HomeWidgetId.metricTrend:
+        return _metricDefaultTitle(item);
+      case HomeWidgetId.hiit:
+        return 'HIIT';
+    }
+  }
+
+  /// `null` means show no header at all — either the type has none by
+  /// design, or the user explicitly cleared this card's title (see
+  /// `HomeLayoutItem.title`'s tri-state doc comment).
+  String? _effectiveTitle(HomeLayoutItem item) {
+    final title = item.title;
+    if (title == null) return _defaultTitleFor(item);
+    return title.isEmpty ? null : title;
+  }
+
   Future<void> _addWidgetMenu() async {
     final order = _currentOrder;
-    final hiddenFixed = HomeWidgetId.values
-        .where(
-          (id) =>
-              id != HomeWidgetId.strengthTrends &&
-              id != HomeWidgetId.metricTrend &&
-              id != HomeWidgetId.weekRings &&
-              !order.any((i) => i.type == id),
-        )
-        .toList();
     final picked = await showModalBottomSheet<HomeWidgetId>(
       context: context,
       backgroundColor: Colors.transparent,
@@ -571,13 +693,6 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               onTap: () => Navigator.pop(context, HomeWidgetId.metricTrend),
             ),
-            for (final id in hiddenFixed)
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: Icon(id.icon, color: AppColors.textSecondary),
-                title: Text(id.label, style: AppText.bodyText),
-                onTap: () => Navigator.pop(context, id),
-              ),
           ],
         ),
       ),
@@ -589,14 +704,23 @@ class _HomeScreenState extends State<HomeScreen> {
           .map((i) => i.exerciseId)
           .whereType<int>()
           .toSet();
-      final exerciseId = await _pickLift(
-        excludeIds: usedIds,
+      const defaultTitle = 'Strength Trend';
+      final result = await _pickLift(
+        alreadyUsedIds: usedIds,
         currentId: null,
-        months: HomeTrendSettings.months,
+        defaultTitle: defaultTitle,
+        currentTitle: null,
+        monthsOverride: null,
       );
-      if (exerciseId == null) return;
+      if (result == null) return;
+      final (exerciseId, title, monthsOverride) = result;
       await _persistOrder([
-        HomeLayoutItem(HomeWidgetId.strengthTrends, exerciseId: exerciseId),
+        HomeLayoutItem(
+          HomeWidgetId.strengthTrends,
+          exerciseId: exerciseId,
+          title: _resolveTitle(title, defaultTitle),
+          monthsOverride: monthsOverride,
+        ),
         ...order,
       ]);
     } else if (picked == HomeWidgetId.metricTrend) {
@@ -605,17 +729,22 @@ class _HomeScreenState extends State<HomeScreen> {
           .map((i) => i.metricRef)
           .whereType<String>()
           .toSet();
+      const defaultTitle = 'Metric Trend';
       final result = await _pickMetric(
-        excludeRefs: usedRefs,
+        alreadyUsedRefs: usedRefs,
         currentRef: null,
-        months: HomeTrendSettings.months,
+        defaultTitle: defaultTitle,
+        currentTitle: null,
+        monthsOverride: null,
       );
       if (result == null) return;
-      final (ref, showGoal) = result;
+      final (ref, title, monthsOverride, showGoal) = result;
       await _persistOrder([
         HomeLayoutItem(
           HomeWidgetId.metricTrend,
           metricRef: ref,
+          title: _resolveTitle(title, defaultTitle),
+          monthsOverride: monthsOverride,
           showGoal: showGoal,
         ),
         ...order,
@@ -625,15 +754,20 @@ class _HomeScreenState extends State<HomeScreen> {
           .where((i) => i.type == HomeWidgetId.weekRings)
           .map((i) => i.metricRef ?? 'steps')
           .toSet();
-      final ref = await _pickWeekRingsMetric(
-        excludeRefs: usedRefs,
+      const defaultTitle = 'This Week';
+      final result = await _pickWeekRingsMetric(
+        alreadyUsedRefs: usedRefs,
         currentRef: null,
+        defaultTitle: defaultTitle,
+        currentTitle: null,
       );
-      if (ref == null) return;
+      if (result == null) return;
+      final (ref, title) = result;
       await _persistOrder([
         HomeLayoutItem(
           HomeWidgetId.weekRings,
           metricRef: ref == 'steps' ? null : ref,
+          title: _resolveTitle(title, defaultTitle),
         ),
         ...order,
       ]);
@@ -647,21 +781,32 @@ class _HomeScreenState extends State<HomeScreen> {
   /// `'steps'` is used as the picker's stand-in for a `null` metricRef (the
   /// original, pre-repeatable meaning) so it shows/selects like any other
   /// option rather than needing special-casing in the sheet itself.
-  Future<String?> _pickWeekRingsMetric({
-    required Set<String> excludeRefs,
+  /// **Deliberately not restricted to one card per metric** (2026-07-26,
+  /// unlike Strength Trend/Metric Trend, which still just dim already-used
+  /// lifts/metrics rather than exclude them either) — the user explicitly
+  /// wants e.g. two separate Steps rings placed in different spots on the
+  /// page to be allowed. `alreadyUsedRefs` only dims, same as the other two.
+  Future<(String, String)?> _pickWeekRingsMetric({
+    required Set<String> alreadyUsedRefs,
     String? currentRef,
-  }) async {
+    required String defaultTitle,
+    String? currentTitle,
+  }) {
     final goals = _goalsByRef();
-    final options = MetricTrendOption.all(_customMetrics)
-        .where((o) => goals.containsKey(o.ref))
-        .where((o) => o.ref == currentRef || !excludeRefs.contains(o.ref))
-        .toList();
-    return showModalBottomSheet<String>(
+    final options = MetricTrendOption.all(
+      _customMetrics,
+    ).where((o) => goals.containsKey(o.ref)).toList();
+    return showModalBottomSheet<(String, String)>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) =>
-          WeekRingsEditSheet(options: options, selectedRef: currentRef),
+      builder: (_) => WeekRingsEditSheet(
+        options: options,
+        selectedRef: currentRef,
+        alreadyUsedRefs: alreadyUsedRefs,
+        defaultTitle: defaultTitle,
+        currentTitle: currentTitle,
+      ),
     );
   }
 
@@ -672,17 +817,22 @@ class _HomeScreenState extends State<HomeScreen> {
         .where((i) => i.type == HomeWidgetId.weekRings && i != item)
         .map((i) => i.metricRef ?? 'steps')
         .toSet();
-    final ref = await _pickWeekRingsMetric(
-      excludeRefs: usedRefs,
+    final defaultTitle = _weekRingsDefaultTitle(item);
+    final result = await _pickWeekRingsMetric(
+      alreadyUsedRefs: usedRefs,
       currentRef: currentRef,
+      defaultTitle: defaultTitle,
+      currentTitle: item.title,
     );
-    if (ref == null) return;
+    if (result == null) return;
+    final (ref, title) = result;
     final newOrder = [
       for (final i in order)
         i == item
             ? HomeLayoutItem(
                 HomeWidgetId.weekRings,
                 metricRef: ref == 'steps' ? null : ref,
+                title: _resolveTitle(title, defaultTitle),
               )
             : i,
     ];
@@ -808,11 +958,40 @@ class _HomeScreenState extends State<HomeScreen> {
     return null;
   }
 
-  Widget _buildSection(
-    BuildContext context,
-    HomeLayoutItem item,
-    DateTime cutoff,
-  ) {
+  /// This card's own history window — its `monthsOverride` if it has one,
+  /// otherwise the shared `HomeTrendSettings.months` default (edited only
+  /// from Settings now). `-1` (the "All time" sentinel) maps to a cutoff far
+  /// enough back to include everything. Mirrors Metrics' `_cutoffFor`.
+  DateTime _cutoffFor(HomeLayoutItem item) {
+    final months = item.monthsOverride ?? HomeTrendSettings.months;
+    if (months < 0) return DateTime(1970);
+    final now = DateTime.now();
+    return DateTime(now.year, now.month - months, now.day);
+  }
+
+  /// The header shown above every card — a plain title for most types, plus
+  /// Primed for Growth's info tooltip alongside its own. `null` means no
+  /// header at all (the user explicitly cleared this card's title) — the
+  /// tooltip goes with it too in that case rather than floating alone.
+  Widget? _sectionHeader(HomeLayoutItem item) {
+    final title = _effectiveTitle(item);
+    if (title == null) return null;
+    if (item.type == HomeWidgetId.primedForGrowth) {
+      return Row(
+        children: [
+          Text(title, style: AppText.subHeader),
+          const InfoTooltip(
+            glossaryKey: 'readiness',
+            title: 'Primed for Growth',
+            footer: ReadinessLegend(),
+          ),
+        ],
+      );
+    }
+    return Text(title, style: AppText.subHeader);
+  }
+
+  Widget _buildSectionBody(BuildContext context, HomeLayoutItem item) {
     switch (item.type) {
       case HomeWidgetId.muscleStatus:
         return AppCard(child: MuscleStatusRow(statuses: _categoryStatuses));
@@ -822,45 +1001,24 @@ class _HomeScreenState extends State<HomeScreen> {
         return const TodoListCard();
       case HomeWidgetId.weekRings:
         final rings = _weekRingsInfo(item.metricRef);
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              rings == null ? 'This Week' : 'This Week · ${rings.title}',
-              style: AppText.subHeader,
-            ),
-            const SizedBox(height: AppSpacing.standard),
-            AppCard(
-              child: rings == null
-                  ? Text(
-                      // Only reachable if a metric's goal got cleared after
-                      // this card was already set to track it.
-                      'This metric no longer has a goal set.',
-                      style: AppText.smallText,
-                    )
-                  : WeekRings(
-                      valuesByDate: rings.valuesByDate,
-                      goal: rings.goal,
-                      workoutDates: _workoutDates,
-                    ),
-            ),
-          ],
+        return AppCard(
+          child: rings == null
+              ? Text(
+                  // Only reachable if a metric's goal got cleared after
+                  // this card was already set to track it.
+                  'This metric no longer has a goal set.',
+                  style: AppText.smallText,
+                )
+              : WeekRings(
+                  valuesByDate: rings.valuesByDate,
+                  goal: rings.goal,
+                  workoutDates: _workoutDates,
+                ),
         );
       case HomeWidgetId.primedForGrowth:
-        return Column(
+        final body = Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Text('Primed for Growth', style: AppText.subHeader),
-                const InfoTooltip(
-                  glossaryKey: 'readiness',
-                  title: 'Primed for Growth',
-                  footer: ReadinessLegend(),
-                ),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.standard),
             AppCard(
               child: SizedBox(
                 height: 160,
@@ -915,16 +1073,30 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ],
         );
-      case HomeWidgetId.trainingSplit:
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        // Normally the info tooltip rides alongside the header text
+        // (`_sectionHeader`) — cleared-title is treated as the edge case,
+        // not the other way round, so it only drops down here, pinned to
+        // the widget's own top-left corner, when there's no header for it
+        // to sit next to. Any other widget that later gains its own header
+        // tooltip should follow the same pattern.
+        if (_effectiveTitle(item) != null) return body;
+        return Stack(
           children: [
-            Text('Training Split', style: AppText.subHeader),
-            const SizedBox(height: AppSpacing.standard),
-            AppCard(
-              child: TrainingCompositionChart(compositions: _compositions),
+            body,
+            Positioned(
+              left: 0,
+              top: 0,
+              child: InfoTooltip(
+                glossaryKey: 'readiness',
+                title: 'Primed for Growth',
+                footer: ReadinessLegend(),
+              ),
             ),
           ],
+        );
+      case HomeWidgetId.trainingSplit:
+        return AppCard(
+          child: TrainingCompositionChart(compositions: _compositions),
         );
       case HomeWidgetId.strengthTrends:
         final byId = {
@@ -935,69 +1107,71 @@ class _HomeScreenState extends State<HomeScreen> {
         final sessions = exercise == null
             ? <SessionWithSets>[]
             : _sessionsByExercise[exercise.id] ?? [];
+        final cutoff = _cutoffFor(item);
         final points = sessions.reversed
             .where((s) => DateTime.parse(s.session.date).isAfter(cutoff))
             .map((s) => ChartPoint(DateTime.parse(s.session.date), s.bestE1rm))
             .where((p) => p.value > 0)
             .toList();
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(exercise?.name ?? 'Strength Trend', style: AppText.subHeader),
-            const SizedBox(height: AppSpacing.standard),
-            if (exercise == null)
-              AppCard(
-                child: Text(
-                  _editing
-                      ? 'Tap the pencil above to choose a lift.'
-                      : 'No lift chosen for this card yet.',
+        if (exercise == null) {
+          return AppCard(
+            child: Text(
+              _editing
+                  ? 'Tap the gear above to choose a lift.'
+                  : 'No lift chosen for this card yet.',
+              style: AppText.smallText,
+            ),
+          );
+        }
+        return AppCard(
+          child: points.isEmpty
+              ? Text(
+                  'Log ${exercise.name} to start seeing a trend here.',
                   style: AppText.smallText,
+                )
+              : CenteredTrendChart(
+                  points: points,
+                  showPrediction: true,
+                  trendStyle: TrendStyle.polynomial,
                 ),
-              )
-            else
-              AppCard(
-                child: points.isEmpty
-                    ? Text(
-                        'Log ${exercise.name} to start seeing a trend here.',
-                        style: AppText.smallText,
-                      )
-                    : CenteredTrendChart(
-                        points: points,
-                        showPrediction: true,
-                        trendStyle: TrendStyle.polynomial,
-                      ),
-              ),
-          ],
         );
       case HomeWidgetId.metricTrend:
-        final info = _metricTrendInfo(item.metricRef, cutoff);
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(info?.title ?? 'Metric Trend', style: AppText.subHeader),
-            const SizedBox(height: AppSpacing.standard),
-            AppCard(
-              child: info == null
-                  ? Text(
-                      _editing
-                          ? 'Tap the pencil above to choose a metric.'
-                          : 'No metric chosen for this card yet.',
-                      style: AppText.smallText,
-                    )
-                  : LabeledTrendChart(
-                      points: info.points,
-                      yLabelFormatter: info.yFormatter,
-                      height: 130,
-                      goal: item.showGoal
-                          ? _goalsByRef()[item.metricRef]
-                          : null,
-                    ),
-            ),
-          ],
+        final info = _metricTrendInfo(item.metricRef, _cutoffFor(item));
+        return AppCard(
+          child: info == null
+              ? Text(
+                  _editing
+                      ? 'Tap the gear above to choose a metric.'
+                      : 'No metric chosen for this card yet.',
+                  style: AppText.smallText,
+                )
+              : LabeledTrendChart(
+                  points: info.points,
+                  yLabelFormatter: info.yFormatter,
+                  height: 130,
+                  goal: item.showGoal ? _goalsByRef()[item.metricRef] : null,
+                ),
         );
       case HomeWidgetId.hiit:
         return _buildHiitCard(context);
     }
+  }
+
+  Widget _buildSection(BuildContext context, HomeLayoutItem item) {
+    final header = _sectionHeader(item);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // No header at all (title explicitly cleared) skips its spacing too
+        // — otherwise clearing a title would just swap visible text for an
+        // equally-tall patch of empty space, not actually reclaim it.
+        if (header != null) ...[
+          header,
+          const SizedBox(height: AppSpacing.standard),
+        ],
+        _buildSectionBody(context, item),
+      ],
+    );
   }
 
   @override
@@ -1008,10 +1182,8 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
-    final now = DateTime.now();
-    final months = HomeTrendSettings.months;
-    final cutoff = DateTime(now.year, now.month - months, now.day);
     final order = _currentOrder;
+    final visibleItems = order.where((i) => !i.hidden).toList();
 
     return RefreshIndicator(
       color: AppColors.accent,
@@ -1037,20 +1209,22 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
           if (!_editing)
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.all(AppSpacing.edge),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    for (final item in order) ...[
-                      _buildSection(context, item, cutoff),
-                      const SizedBox(height: AppSpacing.large),
-                    ],
-                  ],
-                ),
-              ),
-            )
+            visibleItems.isEmpty
+                ? const SliverToBoxAdapter(child: _EmptyHomeState())
+                : SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.all(AppSpacing.edge),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          for (final item in visibleItems) ...[
+                            _buildSection(context, item),
+                            const SizedBox(height: AppSpacing.large),
+                          ],
+                        ],
+                      ),
+                    ),
+                  )
           else
             SliverPadding(
               padding: const EdgeInsets.symmetric(horizontal: AppSpacing.edge),
@@ -1066,31 +1240,20 @@ class _HomeScreenState extends State<HomeScreen> {
                     Material(color: Colors.transparent, child: child),
                 itemBuilder: (context, i) {
                   final item = order[i];
-                  return Dismissible(
-                    key: ValueKey(item.token),
-                    direction: DismissDirection.endToStart,
-                    onDismissed: (_) => _removeItem(item),
-                    background: Container(
-                      alignment: Alignment.centerRight,
-                      padding: const EdgeInsets.only(
-                        right: AppSpacing.standard,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppColors.accent.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(AppRadius.card),
-                      ),
-                      child: const Icon(
-                        Icons.delete_outline,
-                        color: AppColors.accent,
-                      ),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.only(bottom: AppSpacing.large),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: IgnorePointer(
+                  return Padding(
+                    key: ValueKey(item.stableKey),
+                    padding: const EdgeInsets.only(bottom: AppSpacing.large),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: IgnorePointer(
+                            child: Opacity(
+                              // Hidden cards still fully render (same
+                              // size/content), just dimmed — makes exactly
+                              // what's being toggled visible instead of
+                              // collapsing to a bare row.
+                              opacity: item.hidden ? 0.4 : 1.0,
                               // Caches each card's painted content as its own
                               // layer so dragging (which repositions/animates
                               // every other item) doesn't force expensive
@@ -1099,53 +1262,83 @@ class _HomeScreenState extends State<HomeScreen> {
                               // is transformed. This is what made drag/reorder
                               // feel choppy on heavier cards.
                               child: RepaintBoundary(
-                                child: _buildSection(context, item, cutoff),
+                                child: _buildSection(context, item),
                               ),
                             ),
                           ),
-                          // Pencil lives here, outside the IgnorePointer above
-                          // — nesting it inside _buildSection's edit-mode
-                          // pencil meant edit mode's own IgnorePointer was
-                          // swallowing its taps.
-                          if (item.type == HomeWidgetId.strengthTrends)
-                            TapIcon(
-                              icon: Icons.edit_outlined,
-                              size: 20,
-                              onTap: () => _editStrengthTrend(item),
-                            ),
-                          if (item.type == HomeWidgetId.metricTrend)
-                            TapIcon(
-                              icon: Icons.edit_outlined,
-                              size: 20,
-                              onTap: () => _editMetricTrend(item),
-                            ),
-                          if (item.type == HomeWidgetId.weekRings)
-                            TapIcon(
-                              icon: Icons.edit_outlined,
-                              size: 20,
-                              onTap: () => _editWeekRings(item),
-                            ),
-                          ReorderableDragStartListener(
-                            index: i,
-                            child: const Padding(
-                              padding: EdgeInsets.only(
-                                left: AppSpacing.small,
-                                top: AppSpacing.small,
-                              ),
-                              child: Icon(
-                                Icons.drag_handle,
-                                color: AppColors.textSecondary,
+                        ),
+                        // Drag / show-hide / settings / (repeatable-only)
+                        // remove stacked in a column, not a row, so the
+                        // controls only ever cost one icon's worth of width
+                        // next to the card rather than squeezing it out.
+                        Column(
+                          children: [
+                            ReorderableDragStartListener(
+                              index: i,
+                              child: const Padding(
+                                padding: EdgeInsets.only(top: AppSpacing.small),
+                                child: Icon(
+                                  Icons.drag_handle,
+                                  color: AppColors.textSecondary,
+                                ),
                               ),
                             ),
-                          ),
-                        ],
-                      ),
+                            TapIcon(
+                              icon: item.hidden
+                                  ? Icons.visibility_off_outlined
+                                  : Icons.visibility_outlined,
+                              onTap: () => _toggleHidden(item),
+                            ),
+                            TapIcon(
+                              icon: Icons.settings_outlined,
+                              onTap: () => _editItem(item),
+                            ),
+                            if (item.type.isRepeatable)
+                              TapIcon(
+                                icon: Icons.delete_outline,
+                                onTap: () => _removeItem(item),
+                              ),
+                          ],
+                        ),
+                      ],
                     ),
                   );
                 },
               ),
             ),
           const SliverToBoxAdapter(child: SizedBox(height: AppSpacing.xLarge)),
+        ],
+      ),
+    );
+  }
+}
+
+/// Shown instead of an empty scroll area when every widget is hidden — a
+/// user who got here already hid each one individually, so this stays a
+/// short nudge rather than a paragraph explaining edit mode from scratch.
+class _EmptyHomeState extends StatelessWidget {
+  const _EmptyHomeState();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.xLarge * 2),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(
+            Icons.widgets_outlined,
+            size: 40,
+            color: AppColors.textSecondary,
+          ),
+          const SizedBox(height: AppSpacing.standard),
+          Text('Nothing to show', style: AppText.subHeader),
+          const SizedBox(height: AppSpacing.micro),
+          Text(
+            'Tap the edit icon above to bring widgets back.',
+            style: AppText.smallText,
+            textAlign: TextAlign.center,
+          ),
         ],
       ),
     );

@@ -9,10 +9,12 @@ import 'package:share_plus/share_plus.dart';
 import '../../data/profile_manager.dart';
 import '../../services/app_services.dart';
 import '../../services/backup_service.dart';
+import '../../services/home_trend_settings.dart';
 import '../../services/units.dart';
 import '../../services/user_profile.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/app_card.dart';
+import '../../widgets/time_frame_dropdown.dart';
 import '../app_root.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -598,6 +600,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: AppSpacing.large),
           Text('Data', style: AppText.subHeader),
           const SizedBox(height: AppSpacing.standard),
+          AppCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Default time frame', style: AppText.bodyText),
+                const SizedBox(height: AppSpacing.micro),
+                Text(
+                  'How far back Home and Metrics trend cards look by '
+                  'default. Any card can still override this on its own.',
+                  style: AppText.smallText,
+                ),
+                const SizedBox(height: AppSpacing.standard),
+                TimeFrameDropdown(
+                  value: HomeTrendSettings.months,
+                  includeDefault: false,
+                  onChanged: (v) async {
+                    await AppServices.setHomeTrendMonths(v);
+                    setState(() {});
+                  },
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: AppSpacing.cardGap),
           AppCard(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,

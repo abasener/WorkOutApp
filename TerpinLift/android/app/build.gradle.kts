@@ -72,6 +72,19 @@ android {
                 signingConfigs.getByName("debug")
             }
         }
+        debug {
+            // A plain `flutter run` (debug build type) installs as its own
+            // separate app — com.basenerstudio.terrapinlift.dev — instead of
+            // colliding with the real com.basenerstudio.terrapinlift install
+            // on the same device. Before this existed, a local test build and
+            // the production app fought over the same package slot, which is
+            // exactly what caused a real mix-up (see
+            // designFiles/14_PLAY_STORE_RELEASE.md "Local testing vs. the
+            // real app"). `versionNameSuffix` makes a dev build additionally
+            // identifiable from Settings/About without opening app info.
+            applicationIdSuffix = ".dev"
+            versionNameSuffix = "-dev"
+        }
     }
 }
 

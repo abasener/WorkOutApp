@@ -7,6 +7,7 @@ import '../../data/models/custom_metric_entry.dart';
 import '../../data/models/metric_entry.dart';
 import '../../data/models/progress_photo.dart';
 import '../../services/app_services.dart';
+import '../../services/home_trend_settings.dart';
 import '../../services/metric_chart_points.dart';
 import '../../services/metric_layout_settings.dart';
 import '../../services/muscle_map.dart';
@@ -24,11 +25,9 @@ import 'custom_metric_builder_sheet.dart';
 import 'custom_metric_entry_sheet.dart';
 import 'custom_metric_history_sheet.dart';
 import 'cycle_detail_screen.dart';
+import 'metric_card_settings_sheet.dart';
 import 'metric_history_sheet.dart';
 import 'progress_photos_screen.dart';
-
-const _dashboardHistoryDays =
-    183; // ~6 months, per designFiles/05_SCREEN_metrics.md
 
 class MetricsScreen extends StatefulWidget {
   const MetricsScreen({super.key});
@@ -474,21 +473,11 @@ class _MetricsScreenState extends State<MetricsScreen>
         child: CircularProgressIndicator(color: AppColors.accent),
       );
     }
-    final cutoff = DateTime.now().subtract(
-      const Duration(days: _dashboardHistoryDays),
-    );
-
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
         title: const Text('Metrics'),
         actions: [
-          if (_tabController.index == 0 && _editingMetrics)
-            IconButton(
-              icon: const Icon(Icons.visibility_outlined),
-              tooltip: 'Show a hidden card',
-              onPressed: _addMetricCardMenu,
-            ),
           if (_tabController.index == 0)
             IconButton(
               icon: Icon(_editingMetrics ? Icons.check : Icons.edit_outlined),
@@ -515,7 +504,7 @@ class _MetricsScreenState extends State<MetricsScreen>
       ),
       body: TabBarView(
         controller: _tabController,
-        children: [_buildOverviewTab(cutoff), _buildDaysTab()],
+        children: [_buildOverviewTab(), _buildDaysTab()],
       ),
     );
   }
@@ -581,95 +570,64 @@ class _MetricsScreenState extends State<MetricsScreen>
     await _persistMetricOrder(order);
   }
 
-  Future<void> _hideMetricCard(MetricLayoutItem item) async {
-    final order = [..._currentMetricOrder]..remove(item);
+  /// Toggles a card's hidden flag in place — replaces the old "hide removes
+  /// it from the order, a separate popup re-adds it" scheme. A hidden card
+  /// stays exactly where it was (still reorderable), just flagged; the only
+  /// way to add a genuinely new card now is a new custom metric.
+  Future<void> _toggleMetricCardHidden(MetricLayoutItem item) async {
+    final order = [..._currentMetricOrder];
+    final i = order.indexOf(item);
+    if (i == -1) return;
+    order[i] = item.copyWith(hidden: !item.hidden);
     await _persistMetricOrder(order);
   }
 
-  Future<void> _addMetricCardMenu() async {
-    final order = _currentMetricOrder;
-    final hiddenFixed = MetricWidgetId.values.where((id) {
-      if (id == MetricWidgetId.customMetric) return false;
-      if (id == MetricWidgetId.cycle && UserProfile.gender != Gender.female) {
-        return false;
-      }
-      return !order.any((i) => i.type == id);
-    }).toList();
-    final hiddenCustom = _customMetrics.where((m) {
-      return m.id != null &&
-          !order.any(
-            (i) =>
-                i.type == MetricWidgetId.customMetric &&
-                i.customMetricId == m.id,
-          );
-    }).toList();
-
-    final picked = await showModalBottomSheet<MetricLayoutItem>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (_) => Container(
-        padding: const EdgeInsets.fromLTRB(
-          AppSpacing.edge,
-          AppSpacing.standard,
-          AppSpacing.edge,
-          AppSpacing.large,
-        ),
-        decoration: const BoxDecoration(
-          color: AppColors.surfaceRaised,
-          borderRadius: BorderRadius.vertical(
-            top: Radius.circular(AppRadius.card),
-          ),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Add a card', style: AppText.subHeader),
-            const SizedBox(height: AppSpacing.standard),
-            if (hiddenFixed.isEmpty && hiddenCustom.isEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  vertical: AppSpacing.standard,
-                ),
-                child: Text(
-                  'Everything is already shown.',
-                  style: AppText.smallText,
-                ),
-              )
-            else ...[
-              for (final id in hiddenFixed)
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(id.icon, color: AppColors.textSecondary),
-                  title: Text(id.label, style: AppText.bodyText),
-                  onTap: () => Navigator.pop(context, MetricLayoutItem(id)),
-                ),
-              for (final m in hiddenCustom)
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(
-                    Icons.show_chart,
-                    color: AppColors.textSecondary,
-                  ),
-                  title: Text(m.name, style: AppText.bodyText),
-                  onTap: () => Navigator.pop(
-                    context,
-                    MetricLayoutItem(
-                      MetricWidgetId.customMetric,
-                      customMetricId: m.id,
-                    ),
-                  ),
-                ),
-            ],
-          ],
-        ),
-      ),
-    );
-    if (picked == null) return;
-    await _persistMetricOrder([..._currentMetricOrder, picked]);
+  /// This card's own history window — its `monthsOverride` if it has one,
+  /// otherwise `HomeTrendSettings.months` (the "Default" the settings sheet
+  /// shows, read live rather than copied at save time). `-1` (the "All
+  /// time" sentinel, `metric_card_settings_sheet.dart`) maps to a cutoff far
+  /// enough back to include everything without a special-cased "no cutoff"
+  /// path through `MetricChartPoints`. Real month subtraction, same
+  /// convention Home's trend cards already use — replaces the flat
+  /// ~6-month day-count this screen used before every card could have its
+  /// own window.
+  DateTime _cutoffFor(MetricLayoutItem item) {
+    final months = item.monthsOverride ?? HomeTrendSettings.months;
+    if (months < 0) return DateTime(1970);
+    final now = DateTime.now();
+    return DateTime(now.year, now.month - months, now.day);
   }
 
-  Widget _buildMetricCard(MetricLayoutItem item, DateTime cutoff) {
+  /// The goal value backing this card's type, if any is actually set —
+  /// `null` for a type with no goal concept (workoutDuration) or one that
+  /// simply hasn't had a goal configured yet. Steps always has one; see
+  /// designFiles/05_SCREEN_metrics.md "Goals".
+  double? _goalFor(MetricLayoutItem item) {
+    switch (item.type) {
+      case MetricWidgetId.steps:
+        return UserProfile.stepsGoal.toDouble();
+      case MetricWidgetId.sleep:
+        return UserProfile.sleepGoalHours;
+      case MetricWidgetId.weight:
+        return UserProfile.weightGoalLb;
+      case MetricWidgetId.customMetric:
+        for (final m in _customMetrics) {
+          if (m.id == item.customMetricId) {
+            return m.kind == CustomMetricKind.number ? m.goal : null;
+          }
+        }
+        return null;
+      case MetricWidgetId.workoutDuration:
+      case MetricWidgetId.soreness:
+      case MetricWidgetId.cycle:
+      case MetricWidgetId.progressPhotos:
+        return null;
+    }
+  }
+
+  Widget _buildMetricCard(MetricLayoutItem item) {
+    final cutoff = _cutoffFor(item);
+    final goal = item.showGoal ? _goalFor(item) : null;
     switch (item.type) {
       case MetricWidgetId.steps:
         return _metricCard(
@@ -679,6 +637,7 @@ class _MetricsScreenState extends State<MetricsScreen>
           trendWindowDays: 21,
           onAdd: () => _logSimpleMetric(SimpleMetricKind.steps),
           onHistory: () => _showMetricHistory('Steps', _stepsHistoryRows()),
+          goal: goal,
         );
       case MetricWidgetId.sleep:
         return _metricCard(
@@ -687,6 +646,7 @@ class _MetricsScreenState extends State<MetricsScreen>
           trendWindowDays: 30,
           onAdd: () => _logSimpleMetric(SimpleMetricKind.sleep),
           onHistory: () => _showMetricHistory('Sleep', _sleepHistoryRows()),
+          goal: goal,
         );
       case MetricWidgetId.workoutDuration:
         // No "+" here. Workout Duration is derived (planned sessions /
@@ -714,6 +674,7 @@ class _MetricsScreenState extends State<MetricsScreen>
           yFormatter: (v) => Units.formatMaskable(v),
           onAdd: () => _logSimpleMetric(SimpleMetricKind.bodyweight),
           onHistory: () => _showMetricHistory('Weight', _weightHistoryRows()),
+          goal: goal,
         );
       case MetricWidgetId.cycle:
         return _buildCycleCard();
@@ -724,7 +685,7 @@ class _MetricsScreenState extends State<MetricsScreen>
           (m) => m.id == item.customMetricId,
           orElse: () => _customMetrics.first,
         );
-        return _buildCustomMetricCard(metric, cutoff);
+        return _buildCustomMetricCard(metric, cutoff, goal: goal);
     }
   }
 
@@ -852,7 +813,11 @@ class _MetricsScreenState extends State<MetricsScreen>
     );
   }
 
-  Widget _buildCustomMetricCard(CustomMetric metric, DateTime cutoff) {
+  Widget _buildCustomMetricCard(
+    CustomMetric metric,
+    DateTime cutoff, {
+    double? goal,
+  }) {
     return AppCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -889,21 +854,22 @@ class _MetricsScreenState extends State<MetricsScreen>
             points: _customMetricPoints(metric, cutoff),
             yLabelFormatter: _customMetricYFormatter(metric),
             height: 130,
+            goal: goal,
           ),
         ],
       ),
     );
   }
 
-  Widget _buildOverviewTab(DateTime cutoff) {
+  Widget _buildOverviewTab() {
     final order = _currentMetricOrder;
 
     if (!_editingMetrics) {
       return ListView(
         padding: const EdgeInsets.all(AppSpacing.edge),
         children: [
-          for (final item in order) ...[
-            _buildMetricCard(item, cutoff),
+          for (final item in order.where((i) => !i.hidden)) ...[
+            _buildMetricCard(item),
             const SizedBox(height: AppSpacing.cardGap),
           ],
         ],
@@ -916,36 +882,95 @@ class _MetricsScreenState extends State<MetricsScreen>
       children: [
         for (final item in order)
           Padding(
-            key: ValueKey(item.token),
+            key: ValueKey(item.stableKey),
             padding: const EdgeInsets.only(bottom: AppSpacing.cardGap),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
-                  child: IgnorePointer(child: _buildMetricCard(item, cutoff)),
-                ),
-                TapIcon(
-                  icon: Icons.visibility_off_outlined,
-                  onTap: () => _hideMetricCard(item),
-                ),
-                ReorderableDragStartListener(
-                  index: order.indexOf(item),
-                  child: const Padding(
-                    padding: EdgeInsets.only(
-                      left: AppSpacing.small,
-                      top: AppSpacing.small,
-                    ),
-                    child: Icon(
-                      Icons.drag_handle,
-                      color: AppColors.textSecondary,
+                  child: IgnorePointer(
+                    child: Opacity(
+                      // Hidden cards still fully render (same size/content),
+                      // just dimmed — makes exactly what's being toggled
+                      // visible instead of collapsing to a bare row, and
+                      // keeps every card's edit-mode treatment consistent.
+                      opacity: item.hidden ? 0.4 : 1.0,
+                      child: _buildMetricCard(item),
                     ),
                   ),
+                ),
+                // Drag / show-hide / settings stacked in a column, not a
+                // row, so the controls only ever cost one icon's worth of
+                // width next to the card rather than squeezing it out —
+                // see designFiles/00_UX_DESIGN.md "Tap targets" for the
+                // shared TapIcon sizing this keeps.
+                Column(
+                  children: [
+                    ReorderableDragStartListener(
+                      index: order.indexOf(item),
+                      child: const Padding(
+                        padding: EdgeInsets.only(top: AppSpacing.small),
+                        child: Icon(
+                          Icons.drag_handle,
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                    ),
+                    TapIcon(
+                      icon: item.hidden
+                          ? Icons.visibility_off_outlined
+                          : Icons.visibility_outlined,
+                      onTap: () => _toggleMetricCardHidden(item),
+                    ),
+                    if (item.type.hasTimeFrame)
+                      TapIcon(
+                        icon: Icons.settings_outlined,
+                        onTap: () => _openMetricCardSettings(item),
+                      ),
+                  ],
                 ),
               ],
             ),
           ),
       ],
     );
+  }
+
+  /// Card title for the settings sheet's heading — reuses each type's
+  /// label, except a custom metric wants its own name, not the generic
+  /// "Custom metric."
+  String _titleForSettings(MetricLayoutItem item) {
+    if (item.type == MetricWidgetId.customMetric) {
+      for (final m in _customMetrics) {
+        if (m.id == item.customMetricId) return m.name;
+      }
+    }
+    return item.type.label;
+  }
+
+  Future<void> _openMetricCardSettings(MetricLayoutItem item) async {
+    final order = [..._currentMetricOrder];
+    final i = order.indexOf(item);
+    if (i == -1) return;
+    final result = await showModalBottomSheet<(int?, bool)>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => MetricCardSettingsSheet(
+        title: _titleForSettings(item),
+        hasTimeFrame: item.type.hasTimeFrame,
+        monthsOverride: item.monthsOverride,
+        hasGoal: _goalFor(item) != null,
+        showGoal: item.showGoal,
+      ),
+    );
+    if (result == null) return;
+    final (monthsOverride, showGoal) = result;
+    order[i] = item.copyWith(
+      monthsOverride: () => monthsOverride,
+      showGoal: showGoal,
+    );
+    await _persistMetricOrder(order);
   }
 
   /// [onAdd]/[onHistory] add the same notebook/"+" icon pair the custom
@@ -962,6 +987,7 @@ class _MetricsScreenState extends State<MetricsScreen>
     String Function(double)? yFormatter,
     VoidCallback? onAdd,
     VoidCallback? onHistory,
+    double? goal,
   }) {
     return AppCard(
       child: Column(
@@ -988,6 +1014,7 @@ class _MetricsScreenState extends State<MetricsScreen>
             trendWindowDays: trendWindowDays,
             yLabelFormatter: yFormatter,
             height: 130,
+            goal: goal,
           ),
         ],
       ),

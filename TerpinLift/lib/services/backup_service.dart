@@ -65,6 +65,74 @@ class BackupService {
     'app_settings',
   ];
 
+  /// Every table whose rows get a fresh autoincrement `id` on import needs
+  /// any column that pointed at another table's `id` fixed up to match —
+  /// otherwise the file's own internal references (e.g. a `lift_sessions`
+  /// row's `exercise_id`) survive as numbers that meant something in the
+  /// *old* database and nothing in this one, which is exactly the bug this
+  /// map exists to close (2026-07-26: a real restore hit a `FOREIGN KEY
+  /// constraint failed` importing `lift_sessions.exercise_id` for exactly
+  /// this reason). Keyed by `table -> {column: table that column
+  /// references}`; `_importTables` below remaps every listed column using
+  /// the id map it already built while importing that referenced table,
+  /// since `_importOrder` guarantees a parent is always processed first.
+  static const _foreignKeys = {
+    'lift_sessions': {'exercise_id': 'exercises'},
+    'lift_sets': {'session_id': 'lift_sessions'},
+    'cardio_sessions': {'exercise_id': 'exercises'},
+    'cardio_entries': {'session_id': 'cardio_sessions'},
+    // exercise_id has no DB-level FOREIGN KEY constraint here (see the
+    // schema comment in database.dart), but it's still a real reference
+    // that needs the same remap — an unconstrained stale id would just
+    // silently point at the wrong exercise instead of loudly failing.
+    'hiit_slots': {
+      'hiit_session_id': 'hiit_sessions',
+      'exercise_id': 'exercises',
+    },
+    'custom_metric_entries': {'custom_metric_id': 'custom_metrics'},
+    'custom_goals': {'exercise_id': 'exercises'},
+    'workout_template_days': {'template_id': 'workout_templates'},
+    'planned_sessions': {'template_day_id': 'workout_template_days'},
+  };
+
+  /// Tables matched by `name` against whatever's already in the target
+  /// database, instead of being wiped and reassigned fresh ids like every
+  /// other table. These are the two "shared catalog" tables — the exercise
+  /// library (always pre-seeded, even on a brand new install) and
+  /// user-defined custom metrics (may already have entries of their own) —
+  /// that other rows in the *same* import file reference by old id, and
+  /// that a real install already has its own independent copy of. Importing
+  /// must reuse those existing rows' real current ids rather than
+  /// duplicating them or, worse, deleting and reinserting the whole table
+  /// (which would break every other table's already-correct references to
+  /// whatever was there before this import even started).
+  static const _matchByName = {'exercises', 'custom_metrics'};
+
+  /// Processing order for `_importTables` — every table listed after every
+  /// table its own `_foreignKeys` entry points at, so a child's remap
+  /// always has its parent's id map already built. `app_settings` is last
+  /// since it never participates in any reference.
+  static const _importOrder = [
+    'exercises',
+    'custom_metrics',
+    'workout_templates',
+    'workout_template_days',
+    'lift_sessions',
+    'lift_sets',
+    'cardio_sessions',
+    'cardio_entries',
+    'hiit_sessions',
+    'hiit_slots',
+    'custom_metric_entries',
+    'custom_goals',
+    'planned_sessions',
+    'bodyweight_log',
+    'metrics_log',
+    'cycle_log',
+    'todo_items',
+    'app_settings',
+  ];
+
   /// Scoped by the active profile so a demo export can never collide with
   /// (or accidentally overwrite) a personal one, or vice versa. Written to
   /// the app's own documents directory first — Export then opens the OS
@@ -171,7 +239,10 @@ class BackupService {
   /// never wipe a table it has no replacement data for; `SettingsScreen`
   /// warns before calling this if there's existing data to lose. This is
   /// the current export format's counterpart; `importFromJson` below
-  /// handles an older export someone might still have lying around.
+  /// handles an older export someone might still have lying around. Both
+  /// funnel into the shared `_importTables`, which is what actually keeps
+  /// cross-table references (exercise ids, session ids, ...) correct — see
+  /// its doc comment.
   ///
   /// Sheet → table matching is by exact sheet name against `_exportTables`
   /// (case-sensitive — a sheet renamed by hand, e.g. in real Excel, won't
@@ -180,8 +251,7 @@ class BackupService {
   /// header row's text against that table's real DB columns
   /// (`PRAGMA table_info`) — a column that doesn't exist (typo'd by hand,
   /// or from a schema version this file predates) is silently skipped
-  /// rather than failing the whole row, and `id` is always skipped so
-  /// autoincrement assigns fresh ones, same as the JSON path.
+  /// rather than failing the whole row.
   ///
   /// Returns `false` (not a throw) if the workbook decodes fine but not a
   /// single sheet name matches anything TerpinLift exports — "wrong file,"
@@ -201,65 +271,43 @@ class BackupService {
       validColumnsByTable[table] = (await _columnNames(db, table)).toSet();
     }
 
-    await db.transaction((txn) async {
-      for (final sheetName in recognizedSheets) {
-        final table = tableForSheet[sheetName]!;
-        final validColumns = validColumnsByTable[table]!;
-        final rows = excel.sheets[sheetName]!.rows;
-        // `app_settings` upserts by key instead (see below) rather than
-        // being wiped — a settings key the import predates (added in a
-        // newer app version than the file was exported from) shouldn't
-        // get deleted just because this file has nothing to say about it.
-        if (table != 'app_settings') {
-          await txn.delete(table);
-        }
-        if (rows.length < 2) {
-          continue; // header only (or empty) — table stays wiped, nothing to insert
-        }
-
-        final headers = [
-          for (final cell in rows.first) cell?.value?.toString(),
-        ];
-        for (final row in rows.skip(1)) {
-          final map = <String, Object?>{};
-          for (var i = 0; i < headers.length && i < row.length; i++) {
-            final column = headers[i];
-            if (column == null || column == 'id') continue;
-            if (!validColumns.contains(column)) continue;
-            map[column] = _fromCellValue(row[i]?.value);
-          }
-          if (map.isEmpty) continue;
-          // Every other table's real primary key is an autoincrement `id`
-          // (skipped above, so a fresh one gets assigned — never
-          // collides). `app_settings` has no `id` at all; `key` IS its
-          // primary key, and every existing install already has rows for
-          // it (onboarding_complete, gender, ...), so a plain insert
-          // always hits a UNIQUE-constraint violation on the first row
-          // and aborts the whole import. Restoring settings should
-          // overwrite the existing value for that key anyway, so this
-          // table alone imports as an upsert.
-          await txn.insert(
-            table,
-            map,
-            conflictAlgorithm: table == 'app_settings'
-                ? ConflictAlgorithm.replace
-                : ConflictAlgorithm.abort,
-          );
-        }
+    final tables = <String, List<Map<String, Object?>>>{};
+    for (final sheetName in recognizedSheets) {
+      final table = tableForSheet[sheetName]!;
+      final validColumns = validColumnsByTable[table]!;
+      final rows = excel.sheets[sheetName]!.rows;
+      if (rows.length < 2) {
+        tables[table] =
+            []; // header only (or empty) — still wipe, nothing to insert
+        continue;
       }
-    });
-    AppServices.signalReload();
+      final headers = [for (final cell in rows.first) cell?.value?.toString()];
+      final parsed = <Map<String, Object?>>[];
+      for (final row in rows.skip(1)) {
+        final map = <String, Object?>{};
+        for (var i = 0; i < headers.length && i < row.length; i++) {
+          final column = headers[i];
+          if (column == null || !validColumns.contains(column)) continue;
+          map[column] = _fromCellValue(row[i]?.value);
+        }
+        if (map.isEmpty) continue;
+        parsed.add(map);
+      }
+      tables[table] = parsed;
+    }
+
+    await _importTables(db, tables);
     return true;
   }
 
   /// Restores from an older export file's raw JSON content — the format
   /// `exportToFile` produced before it switched to `.xlsx`. Kept around so
   /// a backup made before that change is still restorable; not reachable
-  /// from a fresh export anymore. Same insert-alongside-existing-rows
-  /// behavior as `importFromExcel`, just over the original 7-table list
-  /// that JSON export ever covered (`_tables`, not the fuller
-  /// `_exportTables`) — those 7 are also the only ones a pre-2026-07-21
-  /// export could possibly contain.
+  /// from a fresh export anymore. Same behavior as `importFromExcel` (both
+  /// funnel into `_importTables`), just over the original 7-table list that
+  /// JSON export ever covered (`_tables`, not the fuller `_exportTables`) —
+  /// those 7 are also the only ones a pre-2026-07-21 export could possibly
+  /// contain.
   ///
   /// Returns `false` (rather than throwing) for a file that parses as JSON
   /// but isn't recognizably a TerpinLift export (no known table keys at
@@ -272,36 +320,118 @@ class BackupService {
     if (!_tables.any(dump.containsKey)) return false;
 
     final db = await AppServices.db.database;
+    final tables = <String, List<Map<String, Object?>>>{};
+    for (final table in _tables) {
+      // Skip a table this particular file has nothing for entirely, rather
+      // than wiping it anyway — a table the export doesn't cover shouldn't
+      // lose its existing data with nothing to replace it.
+      if (!dump.containsKey(table)) continue;
+      final rows = dump[table] as List<dynamic>? ?? [];
+      tables[table] = [
+        for (final row in rows) Map<String, Object?>.from(row as Map),
+      ];
+    }
+
+    await _importTables(db, tables);
+    return true;
+  }
+
+  /// Shared write path for both `importFromExcel` and `importFromJson` —
+  /// this is what actually keeps a restore relationally correct, not just
+  /// "column names line up." Takes each recognized table's already-parsed
+  /// rows (still carrying whatever `id` the source file had) and, in
+  /// `_importOrder`:
+  /// - `exercises`/`custom_metrics` (`_matchByName`): matched against
+  ///   what's *already* in this database by `name` — reuses the existing
+  ///   row's real id if found, inserts fresh (and maps to the new id) if
+  ///   not. Never wiped: they're shared catalog tables other installs
+  ///   already have their own populated copy of.
+  /// - `app_settings`: upserts by `key` (its real primary key), same as
+  ///   before — every existing install already has rows for it, so a plain
+  ///   insert would always conflict on the first row.
+  /// - everything else: wiped (`DELETE FROM`) then reinserted with a fresh
+  ///   autoincrement id, same "restore replaces this table's data" behavior
+  ///   as always — but any column listed in `_foreignKeys` for that table
+  ///   gets rewritten from the old id it was exported with to the *new* id
+  ///   its referenced table just got assigned (or matched to) a moment
+  ///   ago, using the id map built while importing that table. A row whose
+  ///   reference can't be resolved (the id map has nothing for it — a
+  ///   genuinely dangling reference in the source file) is skipped rather
+  ///   than inserted with a broken/stale reference or left to throw a raw
+  ///   `FOREIGN KEY constraint failed`.
+  ///
+  /// This is the fix for a real failure (2026-07-26): both import paths
+  /// used to unconditionally drop `id` and let every table reassign fresh
+  /// autoincrement values with no regard for who referenced the old ones —
+  /// which broke on the very first restore that had more than an empty
+  /// `exercises` table to begin with, JSON or Excel alike.
+  static Future<void> _importTables(
+    Database db,
+    Map<String, List<Map<String, Object?>>> tables,
+  ) async {
     await db.transaction((txn) async {
-      for (final table in _tables) {
-        // Skip a table this particular file has nothing for entirely,
-        // rather than wiping it anyway — same reasoning as
-        // importFromExcel: a table the export doesn't cover shouldn't
-        // lose its existing data with nothing to replace it.
-        if (!dump.containsKey(table)) continue;
-        final rows = dump[table] as List<dynamic>? ?? [];
-        if (table != 'app_settings') {
-          await txn.delete(table);
+      final idMaps = <String, Map<int, int>>{};
+
+      for (final table in _importOrder) {
+        final rows = tables[table];
+        if (rows == null) continue; // this file has nothing for this table
+
+        if (table == 'app_settings') {
+          for (final row in rows) {
+            await txn.insert(
+              table,
+              row,
+              conflictAlgorithm: ConflictAlgorithm.replace,
+            );
+          }
+          continue;
         }
+
+        if (_matchByName.contains(table)) {
+          final idMap = idMaps[table] = {};
+          for (final row in rows) {
+            final oldId = row['id'] as int?;
+            final map = Map<String, Object?>.from(row)..remove('id');
+            final name = map['name'];
+            final existing = await txn.query(
+              table,
+              columns: ['id'],
+              where: 'name = ?',
+              whereArgs: [name],
+              limit: 1,
+            );
+            final newId = existing.isNotEmpty
+                ? existing.first['id'] as int
+                : await txn.insert(table, map);
+            if (oldId != null) idMap[oldId] = newId;
+          }
+          continue;
+        }
+
+        await txn.delete(table);
+        final fkColumns = _foreignKeys[table] ?? const {};
+        final idMap = idMaps[table] = {};
         for (final row in rows) {
-          final map = Map<String, dynamic>.from(row as Map);
-          map.remove('id'); // let autoincrement assign fresh ids
-          // Same fix as importFromExcel: app_settings' real primary key is
-          // `key`, not `id`, and every existing install already has rows
-          // for it — a plain insert always conflicts, so this table
-          // upserts instead.
-          await txn.insert(
-            table,
-            map,
-            conflictAlgorithm: table == 'app_settings'
-                ? ConflictAlgorithm.replace
-                : ConflictAlgorithm.abort,
-          );
+          final oldId = row['id'] as int?;
+          final map = Map<String, Object?>.from(row)..remove('id');
+          var unresolvedReference = false;
+          for (final entry in fkColumns.entries) {
+            final parentIdMap = idMaps[entry.value];
+            final oldRef = map[entry.key] as int?;
+            final newRef = oldRef == null ? null : parentIdMap?[oldRef];
+            if (newRef == null) {
+              unresolvedReference = true;
+              break;
+            }
+            map[entry.key] = newRef;
+          }
+          if (unresolvedReference) continue;
+          final newId = await txn.insert(table, map);
+          if (oldId != null) idMap[oldId] = newId;
         }
       }
     });
     AppServices.signalReload();
-    return true;
   }
 
   static Future<String> exportFilePath() async => (await _exportFile()).path;
