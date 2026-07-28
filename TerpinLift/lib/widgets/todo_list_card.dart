@@ -74,6 +74,12 @@ class _TodoListCardState extends State<TodoListCard> {
     final hour = item.reminderHour;
     final minute = item.reminderMinute;
     if (id != null && hour != null && minute != null) {
+      // Explicit cancel before rescheduling — a bare re-schedule with the
+      // same id doesn't reliably replace an already-pending native alarm
+      // for a `matchDateTimeComponents` repeating reminder, which is how a
+      // checked-off item could still fire later that same day. Mirrors
+      // TodoEditSheet._save, which already did this correctly.
+      await NotificationService.cancel(id);
       await NotificationService.scheduleDaily(
         id: id,
         title: 'Checklist reminder',

@@ -8,6 +8,7 @@ import '../../theme/app_theme.dart';
 class _EditableTodo {
   final int? id;
   final TextEditingController textController;
+  final FocusNode focusNode = FocusNode();
   TimeOfDay? time;
 
   _EditableTodo({this.id, required String text, this.time})
@@ -54,8 +55,20 @@ class _TodoEditSheetState extends State<TodoEditSheet> {
   void dispose() {
     for (final row in _rows) {
       row.textController.dispose();
+      row.focusNode.dispose();
     }
     super.dispose();
+  }
+
+  void _addRow() {
+    final row = _EditableTodo(text: '');
+    setState(() => _rows.add(row));
+    // The new row's TextField doesn't exist yet this frame — request focus
+    // once it's actually built, rather than leaving the cursor sitting on
+    // whatever row was focused before "Add another item" was tapped.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) row.focusNode.requestFocus();
+    });
   }
 
   Future<void> _pickTime(int i) async {
@@ -148,6 +161,7 @@ class _TodoEditSheetState extends State<TodoEditSheet> {
           Expanded(
             child: TextField(
               controller: row.textController,
+              focusNode: row.focusNode,
               style: AppText.bodyText,
               decoration: const InputDecoration(labelText: 'Item'),
             ),
@@ -220,8 +234,7 @@ class _TodoEditSheetState extends State<TodoEditSheet> {
                   foregroundColor: AppColors.textPrimary,
                   minimumSize: const Size(double.infinity, 44),
                 ),
-                onPressed: () =>
-                    setState(() => _rows.add(_EditableTodo(text: ''))),
+                onPressed: _addRow,
                 icon: const Icon(Icons.add),
                 label: const Text('Add another item'),
               ),

@@ -466,6 +466,9 @@ class _MetricsScreenState extends State<MetricsScreen>
   List<ChartPoint> _weeklyBodyweightPoints(DateTime cutoff) =>
       MetricChartPoints.weeklyBodyweight(_bodyweight, cutoff);
 
+  List<ChartPoint> _dailyBodyweightPoints(DateTime cutoff) =>
+      MetricChartPoints.dailyBodyweight(_bodyweight, cutoff);
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -667,8 +670,10 @@ class _MetricsScreenState extends State<MetricsScreen>
         return _buildSorenessCard();
       case MetricWidgetId.weight:
         return _metricCard(
-          'Weight (weekly avg)',
-          _weeklyBodyweightPoints(cutoff),
+          item.dailyView ? 'Weight (daily log)' : 'Weight (weekly avg)',
+          item.dailyView
+              ? _dailyBodyweightPoints(cutoff)
+              : _weeklyBodyweightPoints(cutoff),
           showPrediction: true,
           trendWindowDays: 42,
           yFormatter: (v) => Units.formatMaskable(v),
@@ -952,7 +957,7 @@ class _MetricsScreenState extends State<MetricsScreen>
     final order = [..._currentMetricOrder];
     final i = order.indexOf(item);
     if (i == -1) return;
-    final result = await showModalBottomSheet<(int?, bool)>(
+    final result = await showModalBottomSheet<(int?, bool, bool)>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -962,13 +967,16 @@ class _MetricsScreenState extends State<MetricsScreen>
         monthsOverride: item.monthsOverride,
         hasGoal: _goalFor(item) != null,
         showGoal: item.showGoal,
+        hasDailyToggle: item.type == MetricWidgetId.weight,
+        dailyView: item.dailyView,
       ),
     );
     if (result == null) return;
-    final (monthsOverride, showGoal) = result;
+    final (monthsOverride, showGoal, dailyView) = result;
     order[i] = item.copyWith(
       monthsOverride: () => monthsOverride,
       showGoal: showGoal,
+      dailyView: dailyView,
     );
     await _persistMetricOrder(order);
   }

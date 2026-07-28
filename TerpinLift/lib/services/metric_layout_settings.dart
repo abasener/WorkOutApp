@@ -104,12 +104,20 @@ class MetricLayoutItem {
   /// goal value set.
   final bool showGoal;
 
+  /// Weight-only: shows raw daily log entries instead of the default
+  /// weekly average — a deliberate, disclosed opt-in exception to
+  /// designFiles/00_UX_DESIGN.md's usual "never a raw daily reading"
+  /// bodyweight rule (2026-07-27, user's own explicit request). Meaningless
+  /// for every other type.
+  final bool dailyView;
+
   const MetricLayoutItem(
     this.type, {
     this.customMetricId,
     this.hidden = false,
     this.monthsOverride,
     this.showGoal = false,
+    this.dailyView = false,
   });
 
   /// Identity independent of the mutable flags below — use this (not
@@ -133,6 +141,7 @@ class MetricLayoutItem {
       if (hidden) 'hidden=1',
       if (monthsOverride != null) 'months=$monthsOverride',
       if (showGoal) 'goal=1',
+      if (dailyView) 'daily=1',
     ];
     return flags.isEmpty ? base : '$base;${flags.join(';')}';
   }
@@ -149,9 +158,11 @@ class MetricLayoutItem {
     var hidden = false;
     int? monthsOverride;
     var showGoal = false;
+    var dailyView = false;
     for (final flag in parts.skip(1)) {
       if (flag == 'hidden=1') hidden = true;
       if (flag == 'goal=1') showGoal = true;
+      if (flag == 'daily=1') dailyView = true;
       if (flag.startsWith('months=')) {
         monthsOverride = int.tryParse(flag.substring('months='.length));
       }
@@ -165,6 +176,7 @@ class MetricLayoutItem {
       hidden: hidden,
       monthsOverride: monthsOverride,
       showGoal: showGoal,
+      dailyView: dailyView,
     );
   }
 
@@ -177,6 +189,7 @@ class MetricLayoutItem {
     bool? hidden,
     int? Function()? monthsOverride,
     bool? showGoal,
+    bool? dailyView,
   }) => MetricLayoutItem(
     type,
     customMetricId: customMetricId,
@@ -185,6 +198,7 @@ class MetricLayoutItem {
         ? monthsOverride()
         : this.monthsOverride,
     showGoal: showGoal ?? this.showGoal,
+    dailyView: dailyView ?? this.dailyView,
   );
 
   @override
@@ -194,11 +208,18 @@ class MetricLayoutItem {
       other.customMetricId == customMetricId &&
       other.hidden == hidden &&
       other.monthsOverride == monthsOverride &&
-      other.showGoal == showGoal;
+      other.showGoal == showGoal &&
+      other.dailyView == dailyView;
 
   @override
-  int get hashCode =>
-      Object.hash(type, customMetricId, hidden, monthsOverride, showGoal);
+  int get hashCode => Object.hash(
+    type,
+    customMetricId,
+    hidden,
+    monthsOverride,
+    showGoal,
+    dailyView,
+  );
 }
 
 /// Overview tab's card order/visibility — `null` means "not customized yet,"

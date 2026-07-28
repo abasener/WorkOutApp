@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter_body_heatmap/flutter_body_heatmap.dart';
 
@@ -1193,7 +1194,13 @@ class _HomeScreenState extends State<HomeScreen> {
           SliverAppBar(
             pinned: true,
             backgroundColor: AppColors.background,
-            title: const Text('TerrapinLift'),
+            // kDebugMode is a compile-time constant that's only ever true
+            // in a debug build (`flutter run`/`flutter build apk --debug`)
+            // — never a real `--release` build, so this can't leak into
+            // what ships. A second, low-effort way to tell the real app and
+            // the .dev one apart at a glance, on top of the separate
+            // applicationId/icon (designFiles/14_PLAY_STORE_RELEASE.md).
+            title: Text(kDebugMode ? 'TerrapinLift - Dev' : 'TerrapinLift'),
             actions: [
               if (_editing)
                 IconButton(

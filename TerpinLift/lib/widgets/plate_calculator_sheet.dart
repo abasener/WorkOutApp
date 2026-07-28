@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 
 import '../services/calculator_engine.dart';
 import '../services/plate_math.dart';
@@ -10,8 +11,25 @@ import '../theme/app_theme.dart';
 /// Two tabs: a barbell plate calculator, and a plain 4-function calculator
 /// for everything else (plate math on a leg press sled, splitting a
 /// dumbbell pair, whatever).
+///
+/// [initialPlates]/[onPlatesChanged] let the caller carry the Barbell tab's
+/// per-side plates across separate opens of this sheet **within the same
+/// still-open log entry** — e.g. set 1 of a Deadlift session loads 2x45s,
+/// set 2 reopens the calculator already showing them, since the next set of
+/// the same lift is usually close to the last. This sheet itself has no
+/// memory of its own; the caller (`LogLiftForm`) is what actually persists
+/// it, per-exercise, for exactly as long as that one form stays open — nothing
+/// is written to storage, and a fresh log or an edit of an already-saved
+/// session always starts from just the bar.
 class PlateCalculatorSheet extends StatefulWidget {
-  const PlateCalculatorSheet({super.key});
+  final List<double> initialPlates;
+  final ValueChanged<List<double>>? onPlatesChanged;
+
+  const PlateCalculatorSheet({
+    super.key,
+    this.initialPlates = const [],
+    this.onPlatesChanged,
+  });
 
   @override
   State<PlateCalculatorSheet> createState() => _PlateCalculatorSheetState();
@@ -60,7 +78,10 @@ class _PlateCalculatorSheetState extends State<PlateCalculatorSheet> {
             Flexible(
               child: SingleChildScrollView(
                 child: _showBarbell
-                    ? const _BarbellTab()
+                    ? _BarbellTab(
+                        initialPlates: widget.initialPlates,
+                        onPlatesChanged: widget.onPlatesChanged,
+                      )
                     : const _SimpleCalculatorTab(),
               ),
             ),
@@ -117,7 +138,10 @@ class _ModeToggle extends StatelessWidget {
 }
 
 class _BarbellTab extends StatefulWidget {
-  const _BarbellTab();
+  final List<double> initialPlates;
+  final ValueChanged<List<double>>? onPlatesChanged;
+
+  const _BarbellTab({this.initialPlates = const [], this.onPlatesChanged});
 
   @override
   State<_BarbellTab> createState() => _BarbellTabState();
@@ -128,7 +152,8 @@ class _BarbellTabState extends State<_BarbellTab> {
   final _customBarController = TextEditingController();
   bool _customBar = false;
   final _plateController = TextEditingController();
-  final List<double> _plates = [];
+  late final List<double> _plates = List.of(widget.initialPlates);
+  bool _justCopied = false;
 
   List<double> get _barPresets =>
       Units.current == WeightUnit.kg ? [20, 15] : [45, 35];
@@ -147,6 +172,26 @@ class _BarbellTabState extends State<_BarbellTab> {
       _plates.add(value);
       _plates.sort((a, b) => b.compareTo(a));
       _plateController.clear();
+    });
+    widget.onPlatesChanged?.call(_plates);
+  }
+
+  /// Trims a trailing ".0" (`225.0` -> `"225"`) but keeps a real decimal
+  /// (`22.5` -> `"22.5"`) — pasted into a gym-log app/text as whatever's
+  /// actually needed, not a fixed decimal count.
+  String _copyFormat(double v) {
+    final rounded = double.parse(v.toStringAsFixed(1));
+    return rounded == rounded.roundToDouble()
+        ? rounded.toStringAsFixed(0)
+        : rounded.toStringAsFixed(1);
+  }
+
+  Future<void> _copyTotal(double total) async {
+    await Clipboard.setData(ClipboardData(text: _copyFormat(total)));
+    if (!mounted) return;
+    setState(() => _justCopied = true);
+    Future.delayed(const Duration(seconds: 1), () {
+      if (mounted) setState(() => _justCopied = false);
     });
   }
 
@@ -244,26 +289,41 @@ class _BarbellTabState extends State<_BarbellTab> {
           ),
         ],
         const SizedBox(height: AppSpacing.large),
-        Container(
-          padding: const EdgeInsets.all(AppSpacing.cardPad),
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(AppRadius.card),
-            border: Border.all(color: AppColors.border),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Per side: ${perSide.toStringAsFixed(1)} $suffix',
-                style: AppText.smallText,
-              ),
-              const SizedBox(height: AppSpacing.micro),
-              Text(
-                'Total: ${total.toStringAsFixed(1)} $suffix',
-                style: AppText.bigNumber,
-              ),
-            ],
+        GestureDetector(
+          onTap: () => _copyTotal(total),
+          child: Container(
+            padding: const EdgeInsets.all(AppSpacing.cardPad),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(AppRadius.card),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Per side: ${perSide.toStringAsFixed(1)} $suffix',
+                      style: AppText.smallText,
+                    ),
+                    Text(
+                      _justCopied ? 'Copied!' : 'tap to copy',
+                      style: AppText.smallText.copyWith(
+                        fontStyle: FontStyle.italic,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.micro),
+                Text(
+                  'Total: ${total.toStringAsFixed(1)} $suffix',
+                  style: AppText.bigNumber,
+                ),
+              ],
+            ),
           ),
         ),
       ],
@@ -281,7 +341,10 @@ class _BarbellTabState extends State<_BarbellTab> {
         return GestureDetector(
           // Removing from either side removes that plate for both, since
           // they're the same underlying per-side list.
-          onTap: () => setState(() => _plates.removeAt(i)),
+          onTap: () {
+            setState(() => _plates.removeAt(i));
+            widget.onPlatesChanged?.call(_plates);
+          },
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(

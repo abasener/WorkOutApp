@@ -31,6 +31,15 @@ class _LogLiftFormState extends State<LogLiftForm> {
   List<Exercise> _allExercises = [];
   List<Exercise> _exercises = [];
   Exercise? _selected;
+
+  /// The barbell calculator's per-side plates, remembered per exercise for
+  /// as long as this form stays open — set 2 of the same lift usually
+  /// starts close to set 1's load, so reopening Calc on the same exercise
+  /// picks up where it left off instead of re-adding every plate from
+  /// scratch. Purely in-memory, scoped to this one open form: a fresh log
+  /// (new `LogLiftForm` instance) or switching to a different exercise both
+  /// start from just the bar, and nothing here is ever persisted to disk.
+  final Map<int, List<double>> _plateMemory = {};
   final List<_PendingSet> _sets = [_PendingSet()];
   bool _saving = false;
   bool _loading = true;
@@ -177,12 +186,23 @@ class _LogLiftFormState extends State<LogLiftForm> {
                               vertical: 10,
                             ),
                           ),
-                          onPressed: () => showModalBottomSheet(
-                            context: context,
-                            isScrollControlled: true,
-                            backgroundColor: Colors.transparent,
-                            builder: (_) => const PlateCalculatorSheet(),
-                          ),
+                          onPressed: () {
+                            final exerciseId = _selected?.id;
+                            showModalBottomSheet(
+                              context: context,
+                              isScrollControlled: true,
+                              backgroundColor: Colors.transparent,
+                              builder: (_) => PlateCalculatorSheet(
+                                initialPlates: exerciseId == null
+                                    ? const []
+                                    : _plateMemory[exerciseId] ?? const [],
+                                onPlatesChanged: exerciseId == null
+                                    ? null
+                                    : (plates) =>
+                                          _plateMemory[exerciseId] = plates,
+                              ),
+                            );
+                          },
                           icon: const Icon(Icons.calculate_outlined, size: 16),
                           label: const Text('Calc'),
                         ),
