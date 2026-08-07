@@ -26,6 +26,7 @@ import 'custom_metric_entry_sheet.dart';
 import 'custom_metric_history_sheet.dart';
 import 'cycle_detail_screen.dart';
 import 'metric_card_settings_sheet.dart';
+import 'metric_comparison_screen.dart';
 import 'metric_history_sheet.dart';
 import 'progress_photos_screen.dart';
 
@@ -415,6 +416,18 @@ class _MetricsScreenState extends State<MetricsScreen>
     AppServices.signalReload();
   }
 
+  /// Masks this metric's logged values wherever they're passively displayed
+  /// (history rows, chart axis labels) — same "---" convention as
+  /// `Units.hideWeight`, per-metric instead of a single global switch, for a
+  /// metric whose raw number could be sensitive to see plainly (e.g.
+  /// calories) without needing to stop tracking it.
+  Future<void> _toggleCustomMetricHideValue(CustomMetric metric) async {
+    await AppServices.customMetrics.updateDefinition(
+      metric.copyWith(hideValue: !metric.hideValue),
+    );
+    AppServices.signalReload();
+  }
+
   Future<void> _deleteCustomMetric(CustomMetric metric) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -489,6 +502,14 @@ class _MetricsScreenState extends State<MetricsScreen>
                   setState(() => _editingMetrics = !_editingMetrics),
             ),
           IconButton(
+            icon: const Icon(Icons.scatter_plot_outlined),
+            tooltip: 'Compare metrics',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const MetricComparisonScreen()),
+            ),
+          ),
+          IconButton(
             icon: const Icon(Icons.add),
             tooltip: 'New metric',
             onPressed: _openCustomMetricBuilder,
@@ -531,9 +552,12 @@ class _MetricsScreenState extends State<MetricsScreen>
   /// Reconciles the persisted order against current reality: drops a
   /// `cycle` entry if the profile is no longer female (even if it was
   /// customized while female), drops a `customMetric` entry whose metric
-  /// was actually deleted (not just hidden), and appends any custom metric
+  /// was actually deleted (not just hidden), appends any custom metric
   /// created since the order was last saved so a brand-new metric doesn't
-  /// silently vanish from the screen.
+  /// silently vanish from the screen, and appends any built-in card type
+  /// missing from an older persisted order (e.g. one saved under the
+  /// pre-`hidden`-flag scheme, where hiding a card removed it from the list
+  /// entirely instead of just flagging it) so it isn't permanently invisible.
   List<MetricLayoutItem> get _currentMetricOrder {
     final base = MetricLayoutSettings.order ?? _defaultMetricOrder;
     final customIds = _customMetrics.map((m) => m.id).whereType<int>().toSet();
@@ -555,6 +579,16 @@ class _MetricsScreenState extends State<MetricsScreen>
         reconciled.add(
           MetricLayoutItem(MetricWidgetId.customMetric, customMetricId: m.id),
         );
+      }
+    }
+    final presentTypes = reconciled
+        .where((i) => i.type != MetricWidgetId.customMetric)
+        .map((i) => i.type)
+        .toSet();
+    for (final item in _defaultMetricOrder) {
+      if (item.type != MetricWidgetId.customMetric &&
+          !presentTypes.contains(item.type)) {
+        reconciled.add(item);
       }
     }
     return reconciled;
@@ -843,6 +877,13 @@ class _MetricsScreenState extends State<MetricsScreen>
                   onTap: () => _editCustomMetricGoal(metric),
                 ),
               TapIcon(
+                icon: metric.hideValue
+                    ? Icons.visibility_off_outlined
+                    : Icons.visibility_outlined,
+                size: 20,
+                onTap: () => _toggleCustomMetricHideValue(metric),
+              ),
+              TapIcon(
                 icon: Icons.add_circle_outline,
                 size: 20,
                 onTap: () => _logCustomMetric(metric),
@@ -1110,7 +1151,7 @@ class _MetricsScreenState extends State<MetricsScreen>
             sortKey: e.loggedAt,
             icon: Icons.insights,
             label: metric.name,
-            valueText: metric.formatValue(e.value),
+            valueText: metric.formatMaskedValue(e.value),
             onEdit: () => _editCustomMetricEntry(metric, e),
           ),
         );

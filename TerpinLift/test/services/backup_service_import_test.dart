@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:excel/excel.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -163,6 +164,163 @@ void main() {
       // doubled.
       final sessions = await db.query('lift_sessions');
       expect(sessions, hasLength(2));
+    },
+  );
+
+  test(
+    'importFromExcel: a hiit_slots row with a null lift_set_id/'
+    'cardio_entry_id is not dropped as a dangling reference (2026-08-04 '
+    'fix — those two nullable columns joined `_foreignKeys` alongside a '
+    'fix distinguishing "nothing to remap" from "remap target missing"). '
+    'hiit_sessions/hiit_slots only ever round-trip through the .xlsx path, '
+    'not the legacy JSON one, so this exercises importFromExcel directly',
+    () async {
+      final excel = Excel.createExcel();
+
+      final exercisesSheet = excel['Exercises'];
+      exercisesSheet.appendRow([
+        for (final c in [
+          'id',
+          'name',
+          'category',
+          'is_seeded',
+          'youtube_url',
+          'created',
+          'equipment_tags',
+          'pinned',
+          'movement_patterns',
+          'goal_source',
+          'progress_metric',
+          'notes',
+          'target_muscles',
+          'cardio_unit',
+        ])
+          TextCellValue(c),
+      ]);
+      exercisesSheet.appendRow([
+        IntCellValue(20),
+        TextCellValue('Deadlift'),
+        TextCellValue('back,legs,pull'),
+        IntCellValue(1),
+        null,
+        TextCellValue('2026-07-10'),
+        TextCellValue('compound'),
+        IntCellValue(1),
+        TextCellValue('hinge'),
+        TextCellValue('standard'),
+        null,
+        null,
+        null,
+        null,
+      ]);
+
+      final hiitSessionsSheet = excel['HIIT Sessions'];
+      hiitSessionsSheet.appendRow([
+        for (final c in [
+          'id',
+          'date',
+          'notes',
+          'started_at',
+          'completed_at',
+          'status',
+          'automatic',
+          'current_sequence_index',
+          'current_phase',
+          'phase_started_at',
+          'phase_remaining_seconds',
+          'current_reps_remaining',
+          'paused',
+          'total_paused_seconds',
+        ])
+          TextCellValue(c),
+      ]);
+      hiitSessionsSheet.appendRow([
+        IntCellValue(5),
+        TextCellValue('2026-07-11'),
+        null,
+        TextCellValue('2026-07-11T18:00:00.000000'),
+        TextCellValue('2026-07-11T18:25:00.000000'),
+        TextCellValue('completed'),
+        IntCellValue(0),
+        IntCellValue(0),
+        TextCellValue('work'),
+        null,
+        null,
+        null,
+        IntCellValue(0),
+        DoubleCellValue(0.0),
+      ]);
+
+      final hiitSlotsSheet = excel['HIIT Slots'];
+      hiitSlotsSheet.appendRow([
+        for (final c in [
+          'id',
+          'hiit_session_id',
+          'sequence_index',
+          'group_index',
+          'exercise_id',
+          'exercise_kind',
+          'target_type',
+          'target_value',
+          'weight',
+          'rest_after_seconds',
+          'actual_reps',
+          'actual_weight',
+          'actual_time_seconds',
+          'actual_distance',
+          'actual_load',
+          'lift_set_id',
+          'cardio_entry_id',
+        ])
+          TextCellValue(c),
+      ]);
+      hiitSlotsSheet.appendRow([
+        IntCellValue(40),
+        IntCellValue(5),
+        IntCellValue(0),
+        IntCellValue(0),
+        IntCellValue(20),
+        TextCellValue('lift'),
+        TextCellValue('reps'),
+        DoubleCellValue(5.0),
+        DoubleCellValue(135.0),
+        IntCellValue(60),
+        IntCellValue(5),
+        DoubleCellValue(135.0),
+        null,
+        null,
+        null,
+        null, // lift_set_id: not yet populated by any real code path
+        null, // cardio_entry_id: ditto
+      ]);
+
+      final defaultSheet = excel.getDefaultSheet();
+      if (defaultSheet != null &&
+          ![
+            'Exercises',
+            'HIIT Sessions',
+            'HIIT Slots',
+          ].contains(defaultSheet)) {
+        excel.delete(defaultSheet);
+      }
+
+      final ok = await BackupService.importFromExcel(excel.encode()!);
+      expect(ok, isTrue);
+
+      final db = await AppServices.db.database;
+      final slots = await db.query('hiit_slots');
+      expect(slots, hasLength(1));
+      expect(slots.single['lift_set_id'], isNull);
+      expect(slots.single['cardio_entry_id'], isNull);
+
+      // exercise_id (a required, non-null reference) still went through the
+      // normal name-matched remap despite the two nullable columns sitting
+      // right next to it in the same row.
+      final deadliftSlot = await db.rawQuery('''
+          SELECT e.name FROM hiit_slots hs
+          JOIN exercises e ON e.id = hs.exercise_id
+        ''');
+      expect(deadliftSlot.single['name'], 'Deadlift');
     },
   );
 }

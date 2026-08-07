@@ -3,7 +3,7 @@ import 'package:sqflite/sqflite.dart';
 import 'profile_manager.dart';
 
 class DatabaseHelper {
-  static const _kDbVersion = 23;
+  static const _kDbVersion = 27;
 
   /// Which data set this instance reads/writes — see `ProfileManager`.
   /// `AppServices.switchProfile` swaps in a new `DatabaseHelper` rather than
@@ -544,6 +544,17 @@ class DatabaseHelper {
       'cardio_unit': 'miles',
     },
     {
+      // Same shape as Ruck as far as the app knows — legs/core/back under
+      // load, just carried differently. No separate muscle-map curation
+      // needed either (Ruck has none, falls back to the category-based
+      // `MuscleMap.broadGroups` mapping like every other uncurated cardio
+      // exercise).
+      'name': "Farmer's Carry",
+      'categories': 'legs,core,back',
+      'equipment': 'cardio',
+      'cardio_unit': 'miles',
+    },
+    {
       'name': 'Bike',
       'categories': 'legs',
       'equipment': 'cardio',
@@ -803,6 +814,7 @@ class DatabaseHelper {
         day_order   INTEGER NOT NULL,
         day_label   TEXT    NOT NULL,
         patterns    TEXT    NOT NULL,
+        active      INTEGER NOT NULL DEFAULT 1,
         FOREIGN KEY (template_id) REFERENCES workout_templates (id) ON DELETE CASCADE
       )
     ''');
@@ -908,7 +920,8 @@ class DatabaseHelper {
         class_labels         TEXT,
         created              TEXT    NOT NULL,
         allow_multiple_per_day INTEGER NOT NULL DEFAULT 0,
-        goal                 REAL
+        goal                 REAL,
+        hide_value           INTEGER NOT NULL DEFAULT 0
       )
     ''');
     await db.execute('''
@@ -990,6 +1003,30 @@ class DatabaseHelper {
         lift_set_id         INTEGER,
         cardio_entry_id     INTEGER,
         FOREIGN KEY (hiit_session_id) REFERENCES hiit_sessions (id) ON DELETE CASCADE
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE hiit_routines (
+        id        INTEGER PRIMARY KEY AUTOINCREMENT,
+        name      TEXT    NOT NULL,
+        automatic INTEGER NOT NULL DEFAULT 0,
+        created   TEXT    NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE hiit_routine_slots (
+        id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+        hiit_routine_id    INTEGER NOT NULL,
+        sequence_index     INTEGER NOT NULL,
+        group_index        INTEGER NOT NULL,
+        exercise_id        INTEGER NOT NULL,
+        exercise_kind      TEXT    NOT NULL,
+        target_type        TEXT    NOT NULL,
+        target_value       REAL,
+        weight             REAL,
+        rest_after_seconds INTEGER,
+        FOREIGN KEY (hiit_routine_id) REFERENCES hiit_routines (id) ON DELETE CASCADE
       )
     ''');
 
@@ -1322,11 +1359,25 @@ class DatabaseHelper {
       case 16:
         // `allow_multiple_per_day` — a metric built while still on v15
         // (this same round) predates the column the CREATE TABLE above now
-        // includes for anyone migrating straight from v14.
-        await db.execute(
-          'ALTER TABLE custom_metrics ADD COLUMN allow_multiple_per_day '
-          'INTEGER NOT NULL DEFAULT 0',
+        // includes for anyone migrating straight from v14. Guarded by a
+        // column-existence check (bug fixed 2026-07-27): `_onUpgrade` runs
+        // every intervening case in one pass, so a device upgrading from
+        // below v15 hits case 15's CREATE TABLE (which already has this
+        // column) and this case in the same transaction — an unconditional
+        // ALTER TABLE here would fail with "duplicate column name" and crash
+        // the DB open for anyone who hadn't already updated past v15.
+        final customMetricsColumns = await db.rawQuery(
+          'PRAGMA table_info(custom_metrics)',
         );
+        final hasAllowMultiplePerDay = customMetricsColumns.any(
+          (c) => c['name'] == 'allow_multiple_per_day',
+        );
+        if (!hasAllowMultiplePerDay) {
+          await db.execute(
+            'ALTER TABLE custom_metrics ADD COLUMN allow_multiple_per_day '
+            'INTEGER NOT NULL DEFAULT 0',
+          );
+        }
       case 17:
         // Home's Checklist widget — see designFiles/02_SCREEN_home.md.
         await db.execute('''
@@ -1539,6 +1590,86 @@ class DatabaseHelper {
         // ring row. Nullable, no backfill: existing metrics simply start
         // with no goal set, same as weight/sleep goals default to unset.
         await db.execute('ALTER TABLE custom_metrics ADD COLUMN goal REAL');
+      case 24:
+        // Per-metric value masking (designFiles/05_SCREEN_metrics.md
+        // "Goals") — same "---" placeholder convention as
+        // `Units.hideWeight`, for a metric whose raw number could be
+        // sensitive to see plainly (e.g. calories) without needing to stop
+        // tracking it. Nullable-free, defaults off: existing metrics keep
+        // showing their real values exactly as before.
+        await db.execute(
+          'ALTER TABLE custom_metrics ADD COLUMN hide_value INTEGER NOT NULL DEFAULT 0',
+        );
+      case 25:
+        // Multi-template switching (designFiles/10_WORKOUT_PLANNER.md) —
+        // importing a replacement version of a template must be able to
+        // drop a day that no longer exists in the new file without
+        // orphaning any `planned_sessions.template_day_id` that already
+        // points at it. `active` lets a day be soft-hidden (excluded from
+        // `getDaysForTemplate`) instead of ever hard-deleted once history
+        // could reference it; `getAllDaysById` (history lookups) stays
+        // unfiltered so a soft-hidden day still resolves correctly there.
+        await db.execute(
+          'ALTER TABLE workout_template_days ADD COLUMN active '
+          'INTEGER NOT NULL DEFAULT 1',
+        );
+      case 26:
+        // Saved, reusable HIIT routines (designFiles/12_SCREEN_hiit.md) —
+        // distinct from the hardcoded presets (`hiit_presets.dart`) and
+        // from a live/completed `hiit_sessions` row: this is a named
+        // target-only template a user builds once and reloads later, with
+        // no `actual*`/`lift_set_id`/`cardio_entry_id` columns since it has
+        // no result yet. No FK from `hiit_sessions`/`hiit_slots` back to
+        // this table — a saved routine is a starting point for a fresh
+        // session, never a live reference, so deleting or replacing one
+        // can never orphan real logged history (unlike workout-plan
+        // templates above).
+        await db.execute('''
+          CREATE TABLE hiit_routines (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            name      TEXT    NOT NULL,
+            automatic INTEGER NOT NULL DEFAULT 0,
+            created   TEXT    NOT NULL
+          )
+        ''');
+        await db.execute('''
+          CREATE TABLE hiit_routine_slots (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            hiit_routine_id    INTEGER NOT NULL,
+            sequence_index     INTEGER NOT NULL,
+            group_index        INTEGER NOT NULL,
+            exercise_id        INTEGER NOT NULL,
+            exercise_kind      TEXT    NOT NULL,
+            target_type        TEXT    NOT NULL,
+            target_value       REAL,
+            weight             REAL,
+            rest_after_seconds INTEGER,
+            FOREIGN KEY (hiit_routine_id) REFERENCES hiit_routines (id) ON DELETE CASCADE
+          )
+        ''');
+      case 27:
+        // Farmer's Carry — a cardio exercise the app treats identically to
+        // Ruck (same body parts, same "just a different way to carry the
+        // weight" load); backfilled for any install that predates it, same
+        // "only insert if not already present" pattern as the v19 cardio
+        // backfill above. Fresh installs get it directly via
+        // `_seedExercises`.
+        final existingNames = (await db.query(
+          'exercises',
+          columns: ['name'],
+        )).map((r) => r['name'] as String).toSet();
+        if (!existingNames.contains("Farmer's Carry")) {
+          await db.insert('exercises', {
+            'name': "Farmer's Carry",
+            'category': 'legs,core,back',
+            'equipment_tags': 'cardio',
+            'cardio_unit': 'miles',
+            'is_seeded': 1,
+            'youtube_url': null,
+            'created': DateTime.now().toIso8601String().substring(0, 10),
+            'pinned': 0,
+          });
+        }
     }
   }
 

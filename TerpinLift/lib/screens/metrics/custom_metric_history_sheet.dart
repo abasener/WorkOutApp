@@ -104,7 +104,7 @@ class _CustomMetricHistorySheetState extends State<CustomMetricHistorySheet> {
                               children: [
                                 Expanded(
                                   child: Text(
-                                    '${e.date} · ${widget.metric.formatValue(e.value)}',
+                                    '${e.date} · ${widget.metric.formatMaskedValue(e.value)}',
                                     style: AppText.bodyText,
                                   ),
                                 ),

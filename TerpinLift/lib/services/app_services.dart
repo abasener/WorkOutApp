@@ -11,6 +11,7 @@ import '../data/repositories/custom_metric_repository.dart';
 import '../data/repositories/cycle_repository.dart';
 import '../data/repositories/exercise_repository.dart';
 import '../data/repositories/hiit_repository.dart';
+import '../data/repositories/hiit_routine_repository.dart';
 import '../data/repositories/lift_repository.dart';
 import '../data/repositories/metrics_repository.dart';
 import '../data/repositories/progress_photo_repository.dart';
@@ -30,6 +31,7 @@ abstract final class AppServices {
   static late LiftRepository lifts;
   static late CardioRepository cardio;
   static late HiitRepository hiit;
+  static late HiitRoutineRepository hiitRoutines;
   static late BodyweightRepository bodyweight;
   static late MetricsRepository metrics;
   static late CycleRepository cycle;
@@ -52,6 +54,15 @@ abstract final class AppServices {
   /// after it's on.
   static final devModeEnabled = ValueNotifier<bool>(false);
 
+  /// Which saved `WorkoutTemplate` Day Select/Home's planner card currently
+  /// show (designFiles/10_WORKOUT_PLANNER.md "Multi-template switching") —
+  /// `null` means "no explicit choice made yet," which falls back to
+  /// `workoutPlans.getDefaultTemplate()`, matching the app's behavior before
+  /// switching existed. The Workouts tab (past logged history) deliberately
+  /// never reads this — `WorkoutPlanRepository.getAllDaysById()` resolves a
+  /// session's day regardless of which template is currently active.
+  static int? activeTemplateId;
+
   static const _unitSettingKey = 'weight_unit';
   static const _genderSettingKey = 'gender';
   static const _birthYearSettingKey = 'birth_year';
@@ -62,6 +73,7 @@ abstract final class AppServices {
   static const _homeTrendMonthsKey = 'home_trend_months';
   static const _homeWidgetOrderKey = 'home_widget_order';
   static const _metricWidgetOrderKey = 'metric_widget_order';
+  static const _activeTemplateIdKey = 'active_template_id';
   static const _onboardingCompleteKey = 'onboarding_complete';
 
   /// Bump whenever a write happens that other screens should reflect.
@@ -95,6 +107,7 @@ abstract final class AppServices {
     lifts = LiftRepository(db);
     cardio = CardioRepository(db);
     hiit = HiitRepository(db);
+    hiitRoutines = HiitRoutineRepository(db);
     bodyweight = BodyweightRepository(db);
     metrics = MetricsRepository(db);
     cycle = CycleRepository(db);
@@ -154,6 +167,11 @@ abstract final class AppServices {
         .map(MetricLayoutItem.fromToken)
         .whereType<MetricLayoutItem>()
         .toList();
+
+    final storedActiveTemplateId = await settings.get(_activeTemplateIdKey);
+    activeTemplateId = storedActiveTemplateId == null
+        ? null
+        : int.tryParse(storedActiveTemplateId);
 
     await _resolveOnboardingFlag();
   }
@@ -332,6 +350,12 @@ abstract final class AppServices {
   static Future<void> setHomeTrendMonths(int months) async {
     HomeTrendSettings.months = months;
     await settings.set(_homeTrendMonthsKey, months.toString());
+    signalReload();
+  }
+
+  static Future<void> setActiveTemplateId(int id) async {
+    activeTemplateId = id;
+    await settings.set(_activeTemplateIdKey, id.toString());
     signalReload();
   }
 

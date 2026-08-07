@@ -1,6 +1,6 @@
 # Workout Planner (movement-pattern session builder)
 
-**Status: Phases 1 and 2 implemented, plus two rounds of follow-up polish (Home timer, Workouts-tab day grouping + edit/delete; then descriptive day names, day readiness indicator, tap-through-to-workout, grouped-section restyle).** Sparked by a gym-plan PDF the user built in a separate chat (rotating full-body framework, organized by movement pattern — squat/hinge/horizontal-push/vertical-push/horizontal-pull/vertical-pull, plus accessory buckets). This doc captures the scope and shape agreed on before code, plus what's actually built so far — see designFiles/README.md for how these docs are used.
+**Status: Phases 1, 2, and 3 implemented**, plus several rounds of follow-up polish (Home timer, Workouts-tab day grouping + edit/delete; descriptive day names, day readiness indicator, tap-through-to-workout, grouped-section restyle; main/accessory star, multi-template switching, friendly export/import). Sparked by a gym-plan PDF the user built in a separate chat (rotating full-body framework, organized by movement pattern — squat/hinge/horizontal-push/vertical-push/horizontal-pull/vertical-pull, plus accessory buckets). This doc captures the scope and shape agreed on before code, plus what's actually built so far — see designFiles/README.md for how these docs are used.
 
 ## Phase 1 — implemented
 
@@ -32,7 +32,17 @@ Home card (`_buildPlannerCard` in `home_screen.dart`) now has both states: defau
 
 **Start/End Time editing on a completed session (2026-07-17)** — the one other field a completed session's edit mode now exposes, added after a real workout's recorded duration read far shorter than it actually happened. Two time pickers (`showTimePicker`, time-of-day only — the date itself isn't editable here) seeded from the session's own `startedAt`/`completedAt`, with a live-recomputed "Duration: Xh Ym" label so adjusting either field immediately shows the effect — the point being to make "which side cut it short" obvious while fixing it, not just a blind edit. "Save changes" persists both alongside the notes field. This directly feeds `TrendEngine.workoutDurationMinutesByDate` (`05_SCREEN_metrics.md`), which now prefers a completed `PlannedSession`'s own span over summing individual lift-log Track Time windows for any date it covers.
 
-**Not built yet (phase 3):** multi-template switching UI (Settings), saved-template builder beyond the one seeded default, CSV import/export.
+**Not built yet:** a manual template-builder UI (a template still only comes from the one seeded default or importing a file — see "Friendly export/import" below, which supersedes the originally-planned CSV pools/rotation format with a single richer `.xlsx` shape). Multi-template switching and import/export themselves are implemented — see below.
+
+## Phase 3 — implemented (2026-08-04): main/accessory star, multi-template switching, friendly export/import
+
+**Main/accessory star** on each `ActiveDayScreen` slot card (`_slotCard`) — filled `Icons.star` for a "main" pattern (squat/hinge/horizontal-push/vertical-push/horizontal-pull/vertical-pull), outline `Icons.star_outline` for an accessory one (quad-glute/hamstring-glute/adductor-abductor/core/shoulder-prehab/arms-aesthetic) — so effort naturally goes to the right lift first without a new numeric score (`00_UX_DESIGN.md`'s no-gamified-score rule). No new data: `MovementPatternLabel.isMain` (`exercise.dart`) already drew exactly this line.
+
+**Multi-template switching.** More than one `WorkoutTemplate` can now be saved (only reachable via import today, no manual builder yet) and switched between — exactly one is "active" at a time (`AppServices.activeTemplateId`, a plain `app_settings` key, same pattern as `home_widget_order`; unset falls back to `getDefaultTemplate()`, matching pre-switching behavior). `DaySelectScreen` gained a "Switch plan" AppBar action (`Icons.list_alt_outlined`) opening a picker of every saved template; only the active one's days show there and on Home's planner card. **History stays template-agnostic, unchanged** — `WorkoutPlanRepository.getAllDaysById()` already existed specifically so the Workouts tab can resolve any past session's day regardless of which template is currently active, so switching plans can never make old logged history look wrong or disappear (the motivating case: two coaches' plans loaded for the same person, switched between session to session, without one plan's history bleeding into the other).
+
+A new `workout_template_days.active` column (default 1, migration v25) makes **importing a replacement version of a template safe for history** — the one real design wrinkle multi-template switching surfaced. A plain delete-and-recreate of a template's days on import would silently orphan any `planned_sessions.template_day_id` already pointing at an old day. Instead, `WorkoutPlanRepository.replaceTemplateDays` matches the imported file's days to the existing ones **by position**, updates each matched day **in place** (same id, new label/patterns), inserts any extra new days, and **soft-hides** (`active = 0`, never deletes) any existing day beyond what the import now defines — `getDaysForTemplate` filters to `active = 1`, `getAllDaysById` (history) stays unfiltered. Covered by `test/data/repositories/workout_plan_repository_test.dart`.
+
+**Friendly export/import** (`lib/services/plan_export_service.dart`) — shared with HIIT's saved-routine export/import, see `12_SCREEN_hiit.md` for the full shape (name-based, one sheet per template, bold/italic formatting, native file picker, review-before-commit with Add/Replace per sheet). Workout Plan's sheet layout: one row per day (bold day label), one column per pattern slot that day (`Pattern 1`, `Pattern 2`, ...), pattern text matched case-insensitively against `MovementPattern.label`; an unmatched pattern name is skipped and reported on the review sheet rather than failing the whole import. This is how a second template gets created today, pending a real manual builder UI.
 
 ## Does this fit the app's rules?
 
@@ -48,6 +58,10 @@ A third exercise-tag dimension, parallel to `ExerciseCategory` (body part) and `
 Most of the ~75-exercise seeded library already maps cleanly onto these (Back Squat/Front Squat/Hack Squat/Smith Machine Squat → Squat; Barbell Row/Seated Cable Row/T-Bar Row/Dumbbell Row → Horizontal Pull; etc.) — this is mostly tagging existing rows, not adding new ones. A few named in the source PDF aren't seeded yet and should be added: Trap Bar Deadlift, Landmine Press, Cable Pull-Through, Pallof Press, Straight-Arm Cable Pulldown, Glute Bridge Machine.
 
 Editable the same way categories/equipment tags already are (a third `Wrap` of `FilterChip`s in `AddExerciseSheet`), **plus** bulk-editable via CSV import (below) — CSV is the primary path for setting this up wholesale; manual per-exercise editing is for one-off fixes.
+
+## CSV import — original plan, superseded 2026-08-04
+
+**Superseded by the friendly `.xlsx` export/import in "Phase 3" above** — same underlying goals (plain, hand-editable, name-based, match/review step before anything commits) but a single richer spreadsheet format shared with HIIT's saved routines rather than two separate fixed CSV shapes. Left below for historical context on the format's original design reasoning.
 
 ## CSV import — two simple fixed formats, not table auto-detection
 
@@ -103,7 +117,7 @@ Splitting into three passes rather than one large round — this is the biggest 
 
 1. **Pattern tags + ad-hoc pool browsing — implemented.** See "Phase 1" above.
 2. **Day-first active sessions — implemented.** See "Phase 2" above.
-3. **Saved templates + CSV import/export — not started.** Manual template builder as a baseline, multi-template switching (Settings), CSV import/export (pools + rotation formats, match/review step) on top, the Workouts-tab day annotation. Nice-to-have layer over phase 2, not required for it to work standalone.
+3. **Saved templates + export/import — implemented (2026-08-04).** See "Phase 3" above. Multi-template switching and `.xlsx` export/import (superseding the originally-planned CSV pools/rotation format) both landed; a manual template-builder UI did not — import is the only way to create a second template today.
 
 ## Terminology — internal vs. user-facing
 

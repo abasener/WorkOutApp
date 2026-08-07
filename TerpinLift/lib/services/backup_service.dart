@@ -88,6 +88,16 @@ class BackupService {
     'hiit_slots': {
       'hiit_session_id': 'hiit_sessions',
       'exercise_id': 'exercises',
+      // Nullable — only ever set once `lift_set_id`/`cardio_entry_id` get
+      // wired up to actually link a slot to the set/entry it produced (not
+      // populated by any code path today, see `hiit_slot.dart`). Added here
+      // 2026-08-04 for correctness ahead of that, alongside the null-vs-
+      // dangling-reference fix in `_importTables` below — without that fix,
+      // adding a nullable FK column here would have made every row with a
+      // null value here (currently *every* row) look "unresolved" and get
+      // silently dropped on import instead of just left null.
+      'lift_set_id': 'lift_sets',
+      'cardio_entry_id': 'cardio_entries',
     },
     'custom_metric_entries': {'custom_metric_id': 'custom_metrics'},
     'custom_goals': {'exercise_id': 'exercises'},
@@ -416,9 +426,14 @@ class BackupService {
           final map = Map<String, Object?>.from(row)..remove('id');
           var unresolvedReference = false;
           for (final entry in fkColumns.entries) {
-            final parentIdMap = idMaps[entry.value];
             final oldRef = map[entry.key] as int?;
-            final newRef = oldRef == null ? null : parentIdMap?[oldRef];
+            // A column with nothing to remap (a legitimately null optional
+            // reference, e.g. `hiit_slots.lift_set_id` on every row today)
+            // isn't a dangling reference — only a *non-null* old id with no
+            // match in the parent's id map is.
+            if (oldRef == null) continue;
+            final parentIdMap = idMaps[entry.value];
+            final newRef = parentIdMap?[oldRef];
             if (newRef == null) {
               unresolvedReference = true;
               break;

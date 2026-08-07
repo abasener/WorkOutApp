@@ -84,6 +84,10 @@ abstract class MetricChartPoints {
   }
 
   static String Function(double)? customYFormatter(CustomMetric metric) {
+    // Masked first, regardless of kind — trend *shape* stays fully visible
+    // (real values still drive point positions), only the printed axis
+    // number is hidden. Same convention as `Units.formatMaskable`.
+    if (metric.hideValue) return (_) => '---';
     if (metric.kind != CustomMetricKind.classes) return null;
     return (v) {
       final i = v.round().clamp(0, metric.classLabels.length - 1);

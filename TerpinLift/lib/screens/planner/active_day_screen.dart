@@ -443,7 +443,23 @@ class _ActiveDayScreenState extends State<ActiveDayScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(pattern.label, style: AppText.bodyText),
+                  Row(
+                    children: [
+                      Text(pattern.label, style: AppText.bodyText),
+                      const SizedBox(width: AppSpacing.micro),
+                      // Filled = a "main" pattern (squat/hinge/push/pull) —
+                      // where effort should go first when fresh; outline =
+                      // accessory/prehab. Reuses the existing main/accessory
+                      // split (`MovementPatternLabel.isMain`) rather than a
+                      // new rating scale, per the app's no-gamified-score
+                      // convention (00_UX_DESIGN.md).
+                      Icon(
+                        pattern.isMain ? Icons.star : Icons.star_outline,
+                        size: 14,
+                        color: AppColors.textSecondary,
+                      ),
+                    ],
+                  ),
                   const SizedBox(height: AppSpacing.micro),
                   Text(
                     matches.isEmpty ? '$poolSize lifts' : doneNames,

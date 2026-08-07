@@ -58,6 +58,17 @@ class CustomMetric {
   /// Settings. `null` = no goal set.
   final double? goal;
 
+  /// Masks this metric's logged values wherever they're displayed (history
+  /// rows, trend-chart axis labels) the same way `Units.hideWeight` masks
+  /// bodyweight — a "---" placeholder in place of the real number, trend
+  /// *shape* still fully visible. For a metric that can be sensitive to see
+  /// as a plain number (e.g. calories, for someone with a history of
+  /// disordered eating) without needing to stop tracking it entirely.
+  /// Doesn't touch entry/edit forms — the real value still shows while
+  /// logging or correcting one, only passive display is masked. Off by
+  /// default.
+  final bool hideValue;
+
   const CustomMetric({
     this.id,
     required this.name,
@@ -68,7 +79,21 @@ class CustomMetric {
     required this.created,
     this.allowMultiplePerDay = false,
     this.goal,
+    this.hideValue = false,
   });
+
+  CustomMetric copyWith({bool? hideValue}) => CustomMetric(
+    id: id,
+    name: name,
+    kind: kind,
+    scaleMax: scaleMax,
+    scaleIcon: scaleIcon,
+    classLabels: classLabels,
+    created: created,
+    allowMultiplePerDay: allowMultiplePerDay,
+    goal: goal,
+    hideValue: hideValue ?? this.hideValue,
+  );
 
   factory CustomMetric.fromMap(Map<String, dynamic> m) => CustomMetric(
     id: m['id'] as int?,
@@ -85,6 +110,7 @@ class CustomMetric {
     created: m['created'] as String,
     allowMultiplePerDay: (m['allow_multiple_per_day'] as int?) == 1,
     goal: (m['goal'] as num?)?.toDouble(),
+    hideValue: (m['hide_value'] as int?) == 1,
   );
 
   Map<String, dynamic> toMap() => {
@@ -96,6 +122,7 @@ class CustomMetric {
     'created': created,
     'allow_multiple_per_day': allowMultiplePerDay ? 1 : 0,
     'goal': goal,
+    'hide_value': hideValue ? 1 : 0,
   };
 
   /// A logged [value] as plain text, in whichever shape [kind] calls for —
@@ -116,4 +143,11 @@ class CustomMetric {
         return classLabels[i];
     }
   }
+
+  /// [formatValue], but masked to `'---'` when [hideValue] is on — use this
+  /// at passive-display sites (history rows, chart axis labels); entry/edit
+  /// forms should keep using [formatValue] directly so editing still shows
+  /// the real value.
+  String formatMaskedValue(double value) =>
+      hideValue ? '---' : formatValue(value);
 }
