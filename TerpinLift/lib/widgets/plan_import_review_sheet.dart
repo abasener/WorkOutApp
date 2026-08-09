@@ -6,25 +6,31 @@ import '../theme/app_theme.dart';
 /// kind-agnostic view built by the caller from either
 /// `ParsedHiitRoutine`/`ParsedWorkoutTemplate` (`plan_export_service.dart`)
 /// so this widget doesn't need to know which kind it's reviewing.
-/// [add] is mutated in place as the user toggles Add/Replace, then read
-/// back by the caller after the sheet returns `true`.
+///
+/// Whether a sheet becomes an Add or a Replace isn't a user choice — it's
+/// just a fact about whether something by that name already exists. The
+/// only real choice here is whether to apply that (the default) or skip
+/// this sheet entirely. [skip] is mutated in place as the user toggles it,
+/// then read back by the caller after the sheet returns `true`.
 class ImportReviewRow {
   final String name;
   final bool alreadyExists;
   final List<String> unmatchedNames;
-  bool add;
+  bool skip = false;
 
   ImportReviewRow({
     required this.name,
     required this.alreadyExists,
     required this.unmatchedNames,
-  }) : add = !alreadyExists;
+  });
+
+  String get action => alreadyExists ? 'Replace' : 'Add';
 }
 
 /// Shared "here's what will change" confirmation step for both HIIT-routine
 /// and Workout-Plan-template import (designFiles/10_WORKOUT_PLANNER.md /
 /// 12_SCREEN_hiit.md) — nothing commits to the database until this sheet's
-/// Confirm is pressed. Returns `true` (each [rows] entry's `.add` reflects
+/// Confirm is pressed. Returns `true` (each [rows] entry's `.skip` reflects
 /// the final choice) or `null`/`false` if cancelled.
 class PlanImportReviewSheet extends StatefulWidget {
   final List<ImportReviewRow> rows;
@@ -133,30 +139,27 @@ class _PlanImportReviewSheetState extends State<PlanImportReviewSheet> {
           Row(
             children: [
               ChoiceChip(
-                label: const Text('Add'),
-                selected: row.add,
+                label: Text(row.action),
+                selected: !row.skip,
                 showCheckmark: false,
-                onSelected: (_) => setState(() => row.add = true),
+                onSelected: (_) => setState(() => row.skip = false),
               ),
               const SizedBox(width: AppSpacing.small),
               ChoiceChip(
-                label: const Text('Replace'),
-                selected: !row.add,
+                label: const Text('Skip'),
+                selected: row.skip,
                 showCheckmark: false,
-                onSelected: (_) => setState(() => row.add = false),
+                onSelected: (_) => setState(() => row.skip = true),
               ),
             ],
           ),
           const SizedBox(height: AppSpacing.micro),
           Text(
-            row.add
-                ? (row.alreadyExists
-                      ? 'Add: saved as a new, separately named entry.'
-                      : 'Add: saved as new.')
+            row.skip
+                ? "Skipped: \"${row.name}\" won't be touched."
                 : (row.alreadyExists
                       ? 'Replace: overwrites the existing "${row.name}".'
-                      : "Replace: nothing named \"${row.name}\" exists yet, "
-                            'so this just adds it.'),
+                      : 'Add: saved as new.'),
             style: AppText.smallText,
           ),
           if (row.unmatchedNames.isNotEmpty) ...[

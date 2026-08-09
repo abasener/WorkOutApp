@@ -153,7 +153,7 @@ class _DaySelectScreenState extends State<DaySelectScreen> {
 
     await PlanExportService.commitWorkoutPlanImport([
       for (var i = 0; i < parsed.length; i++)
-        WorkoutPlanImportDecision(parsed: parsed[i], add: rows[i].add),
+        WorkoutPlanImportDecision(parsed: parsed[i], skip: rows[i].skip),
     ]);
     if (!mounted) return;
     setState(() => _loading = true);

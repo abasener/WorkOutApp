@@ -436,7 +436,7 @@ class _HiitSetupScreenState extends State<HiitSetupScreen> {
 
     await PlanExportService.commitHiitImport([
       for (var i = 0; i < parsed.length; i++)
-        HiitImportDecision(parsed: parsed[i], add: rows[i].add),
+        HiitImportDecision(parsed: parsed[i], skip: rows[i].skip),
     ]);
     final savedRoutines = await AppServices.hiitRoutines.getAllRoutines();
     if (!mounted) return;

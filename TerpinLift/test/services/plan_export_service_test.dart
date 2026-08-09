@@ -320,8 +320,8 @@ void main() {
     expect(exerciseSheetTexts, contains('Back Squat'));
   });
 
-  test('commitHiitImport: Add creates a separately-named copy, Replace '
-      'overwrites the existing one', () async {
+  test('commitHiitImport: committing a name that already exists always '
+      'resolves to Replace, overwriting in place', () async {
     final exercises = await AppServices.exercises.getAll();
     final pushUp = exercises.firstWhere((e) => e.name == 'Push Up');
 
@@ -358,27 +358,73 @@ void main() {
       alreadyExists: true,
     );
 
+    // Since "Base Routine" already exists, committing it (unskipped) always
+    // resolves to Replace — there's no user-selectable Add path that would
+    // create a second copy anymore (that choice was removed; only whether
+    // to apply or skip a sheet is up to the user now).
     await PlanExportService.commitHiitImport([
-      HiitImportDecision(parsed: parsed, add: true),
+      HiitImportDecision(parsed: parsed, skip: false),
     ]);
-    final afterAdd = await AppServices.hiitRoutines.getAllRoutines();
-    expect(
-      afterAdd.map((r) => r.name),
-      containsAll(['Base Routine', 'Base Routine (2)']),
-    );
-
-    await PlanExportService.commitHiitImport([
-      HiitImportDecision(parsed: parsed, add: false),
-    ]);
-    final afterReplace = await AppServices.hiitRoutines.getAllRoutines();
-    // Still exactly the same two names — Replace overwrote in place,
-    // didn't add a third.
-    expect(afterReplace, hasLength(2));
+    final afterCommit = await AppServices.hiitRoutines.getAllRoutines();
+    expect(afterCommit, hasLength(1));
+    expect(afterCommit.single.name, 'Base Routine');
     final baseSlots = await AppServices.hiitRoutines.getSlotsForRoutine(
       routineId,
     );
     expect(baseSlots.single.targetValue, 25);
   });
+
+  test(
+    'commitHiitImport: skip: true leaves an existing routine untouched',
+    () async {
+      final exercises = await AppServices.exercises.getAll();
+      final pushUp = exercises.firstWhere((e) => e.name == 'Push Up');
+      final routineId = await AppServices.hiitRoutines.insertRoutine(
+        const HiitRoutine(name: 'Untouched Routine', created: '2026-08-05'),
+      );
+      await AppServices.hiitRoutines.insertRoutineSlots([
+        HiitRoutineSlot(
+          hiitRoutineId: routineId,
+          sequenceIndex: 0,
+          groupIndex: 0,
+          exerciseId: pushUp.id!,
+          exerciseKind: HiitExerciseKind.lift,
+          targetType: HiitTargetType.reps,
+          targetValue: 10,
+        ),
+      ]);
+
+      final parsed = ParsedHiitRoutine(
+        name: 'Untouched Routine',
+        automatic: true,
+        slots: [
+          HiitRoutineSlot(
+            hiitRoutineId: 0,
+            sequenceIndex: 0,
+            groupIndex: 0,
+            exerciseId: pushUp.id!,
+            exerciseKind: HiitExerciseKind.lift,
+            targetType: HiitTargetType.reps,
+            targetValue: 999,
+          ),
+        ],
+        unmatchedExerciseNames: const [],
+        alreadyExists: true,
+      );
+      await PlanExportService.commitHiitImport([
+        HiitImportDecision(parsed: parsed, skip: true),
+      ]);
+
+      final slots = await AppServices.hiitRoutines.getSlotsForRoutine(
+        routineId,
+      );
+      expect(
+        slots.single.targetValue,
+        10,
+        reason: 'skip should change nothing',
+      );
+    },
+  );
 
   test('a HIIT sheet with blank Weight/Rest/Target Value cells parses to null '
       'for those fields instead of throwing — real users will leave cells '
@@ -422,12 +468,12 @@ void main() {
     expect(slot.exerciseKind, HiitExerciseKind.lift);
   });
 
-  test('commitHiitImport: Add when nothing exists yet just inserts, no '
-      'suffix needed', () async {
+  test('commitHiitImport: nothing existing yet just inserts fresh, whether '
+      'the sheet thought it was Add or Replace', () async {
     final exercises = await AppServices.exercises.getAll();
     final pushUp = exercises.firstWhere((e) => e.name == 'Push Up');
-    final parsed = ParsedHiitRoutine(
-      name: 'Brand New Routine',
+    ParsedHiitRoutine makeParsed(String name) => ParsedHiitRoutine(
+      name: name,
       automatic: false,
       slots: [
         HiitRoutineSlot(
@@ -444,46 +490,17 @@ void main() {
       alreadyExists: false,
     );
     await PlanExportService.commitHiitImport([
-      HiitImportDecision(parsed: parsed, add: true),
+      HiitImportDecision(parsed: makeParsed('Brand New Routine'), skip: false),
     ]);
     final all = await AppServices.hiitRoutines.getAllRoutines();
     expect(all.map((r) => r.name), contains('Brand New Routine'));
-    expect(all.map((r) => r.name), isNot(contains('Brand New Routine (2)')));
   });
 
-  test('commitHiitImport: Replace when nothing exists yet just inserts fresh, '
-      "doesn't error out looking for something to overwrite", () async {
+  test('commitHiitImport: repeated commits of the same name never duplicate — '
+      'the second and third just replace the first, in place', () async {
     final exercises = await AppServices.exercises.getAll();
     final pushUp = exercises.firstWhere((e) => e.name == 'Push Up');
-    final parsed = ParsedHiitRoutine(
-      name: 'Never Saved Before',
-      automatic: false,
-      slots: [
-        HiitRoutineSlot(
-          hiitRoutineId: 0,
-          sequenceIndex: 0,
-          groupIndex: 0,
-          exerciseId: pushUp.id!,
-          exerciseKind: HiitExerciseKind.lift,
-          targetType: HiitTargetType.reps,
-          targetValue: 10,
-        ),
-      ],
-      unmatchedExerciseNames: const [],
-      alreadyExists: false,
-    );
-    await PlanExportService.commitHiitImport([
-      HiitImportDecision(parsed: parsed, add: false),
-    ]);
-    final all = await AppServices.hiitRoutines.getAllRoutines();
-    expect(all.map((r) => r.name), contains('Never Saved Before'));
-  });
-
-  test('repeated Add collisions increment past (2) to (3), not overwrite or '
-      'collide', () async {
-    final exercises = await AppServices.exercises.getAll();
-    final pushUp = exercises.firstWhere((e) => e.name == 'Push Up');
-    ParsedHiitRoutine makeParsed() => ParsedHiitRoutine(
+    ParsedHiitRoutine makeParsed(double reps) => ParsedHiitRoutine(
       name: 'Repeat Me',
       automatic: false,
       slots: [
@@ -494,7 +511,7 @@ void main() {
           exerciseId: pushUp.id!,
           exerciseKind: HiitExerciseKind.lift,
           targetType: HiitTargetType.reps,
-          targetValue: 10,
+          targetValue: reps,
         ),
       ],
       unmatchedExerciseNames: const [],
@@ -502,14 +519,15 @@ void main() {
     );
     for (var i = 0; i < 3; i++) {
       await PlanExportService.commitHiitImport([
-        HiitImportDecision(parsed: makeParsed(), add: true),
+        HiitImportDecision(parsed: makeParsed(10.0 + i), skip: false),
       ]);
     }
     final all = await AppServices.hiitRoutines.getAllRoutines();
-    expect(
-      all.map((r) => r.name),
-      containsAll(['Repeat Me', 'Repeat Me (2)', 'Repeat Me (3)']),
+    expect(all.where((r) => r.name == 'Repeat Me'), hasLength(1));
+    final slots = await AppServices.hiitRoutines.getSlotsForRoutine(
+      all.single.id!,
     );
+    expect(slots.single.targetValue, 12, reason: 'last commit should win');
   });
 
   test(
@@ -539,7 +557,7 @@ void main() {
             unmatchedExerciseNames: const [],
             alreadyExists: false,
           ),
-          add: true,
+          skip: false,
         ),
       ]);
       await PlanExportService.commitWorkoutPlanImport([
@@ -557,7 +575,7 @@ void main() {
             unmatchedPatternLabels: const [],
             alreadyExists: false,
           ),
-          add: true,
+          skip: false,
         ),
       ]);
 
@@ -602,52 +620,59 @@ void main() {
     expect(template.days.single.patterns, [MovementPattern.core]);
   });
 
-  test('commitWorkoutPlanImport: Replace when nothing exists yet just inserts '
-      'fresh', () async {
-    const parsed = ParsedWorkoutTemplate(
-      name: 'Never Saved Plan',
-      days: [
-        WorkoutTemplateDay(
-          templateId: 0,
-          dayOrder: 0,
-          dayLabel: 'Day 1',
-          patterns: [MovementPattern.squat],
-        ),
-      ],
-      unmatchedPatternLabels: [],
-      alreadyExists: false,
-    );
-    await PlanExportService.commitWorkoutPlanImport([
-      WorkoutPlanImportDecision(parsed: parsed, add: false),
-    ]);
-    final all = await AppServices.workoutPlans.getAllTemplates();
-    expect(all.map((t) => t.name), contains('Never Saved Plan'));
-  });
-
-  test('commitWorkoutPlanImport: repeated Add collisions increment past (2) '
-      'to (3)', () async {
-    ParsedWorkoutTemplate makeParsed() => const ParsedWorkoutTemplate(
-      name: 'Repeat Plan',
-      days: [
-        WorkoutTemplateDay(
-          templateId: 0,
-          dayOrder: 0,
-          dayLabel: 'Day 1',
-          patterns: [MovementPattern.squat],
-        ),
-      ],
-      unmatchedPatternLabels: [],
-      alreadyExists: false,
-    );
-    for (var i = 0; i < 3; i++) {
+  test(
+    'commitWorkoutPlanImport: nothing existing yet just inserts fresh',
+    () async {
+      const parsed = ParsedWorkoutTemplate(
+        name: 'Never Saved Plan',
+        days: [
+          WorkoutTemplateDay(
+            templateId: 0,
+            dayOrder: 0,
+            dayLabel: 'Day 1',
+            patterns: [MovementPattern.squat],
+          ),
+        ],
+        unmatchedPatternLabels: [],
+        alreadyExists: false,
+      );
       await PlanExportService.commitWorkoutPlanImport([
-        WorkoutPlanImportDecision(parsed: makeParsed(), add: true),
+        WorkoutPlanImportDecision(parsed: parsed, skip: false),
       ]);
-    }
-    final all = await AppServices.workoutPlans.getAllTemplates();
-    expect(
-      all.map((t) => t.name),
-      containsAll(['Repeat Plan', 'Repeat Plan (2)', 'Repeat Plan (3)']),
-    );
-  });
+      final all = await AppServices.workoutPlans.getAllTemplates();
+      expect(all.map((t) => t.name), contains('Never Saved Plan'));
+    },
+  );
+
+  test(
+    'commitWorkoutPlanImport: repeated commits of the same name never '
+    'duplicate — the day-matching Replace logic keeps it to one template',
+    () async {
+      ParsedWorkoutTemplate makeParsed(String label) => ParsedWorkoutTemplate(
+        name: 'Repeat Plan',
+        days: [
+          WorkoutTemplateDay(
+            templateId: 0,
+            dayOrder: 0,
+            dayLabel: label,
+            patterns: const [MovementPattern.squat],
+          ),
+        ],
+        unmatchedPatternLabels: const [],
+        alreadyExists: false,
+      );
+      for (var i = 0; i < 3; i++) {
+        await PlanExportService.commitWorkoutPlanImport([
+          WorkoutPlanImportDecision(parsed: makeParsed('Day $i'), skip: false),
+        ]);
+      }
+      final all = await AppServices.workoutPlans.getAllTemplates();
+      final repeatPlans = all.where((t) => t.name == 'Repeat Plan');
+      expect(repeatPlans, hasLength(1));
+      final days = await AppServices.workoutPlans.getDaysForTemplate(
+        repeatPlans.single.id!,
+      );
+      expect(days.single.dayLabel, 'Day 2', reason: 'last commit should win');
+    },
+  );
 }

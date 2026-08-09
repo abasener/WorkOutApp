@@ -48,21 +48,21 @@ class ParsedWorkoutTemplate {
   });
 }
 
-/// One sheet's Add-vs-Replace decision from the review sheet — `add: true`
-/// always creates a new entry (auto-suffixing the name if it collides with
-/// one that already exists, e.g. "Arm Day (2)"); `add: false` overwrites
-/// whatever already exists under that exact name, or creates it fresh if
-/// nothing did.
+/// One sheet's Skip-vs-apply decision from the review sheet. Whether
+/// applying means an Add or a Replace isn't part of this decision at all —
+/// that's just a fact about whether something by that name already
+/// exists, resolved fresh at commit time (`commitHiitImport`/
+/// `commitWorkoutPlanImport`), not a user choice to get wrong.
 class HiitImportDecision {
   final ParsedHiitRoutine parsed;
-  final bool add;
-  const HiitImportDecision({required this.parsed, required this.add});
+  final bool skip;
+  const HiitImportDecision({required this.parsed, required this.skip});
 }
 
 class WorkoutPlanImportDecision {
   final ParsedWorkoutTemplate parsed;
-  final bool add;
-  const WorkoutPlanImportDecision({required this.parsed, required this.add});
+  final bool skip;
+  const WorkoutPlanImportDecision({required this.parsed, required this.skip});
 }
 
 /// Friendly, human-editable Excel export/import for saved HIIT routines and
@@ -405,58 +405,39 @@ abstract class PlanExportService {
     return results;
   }
 
-  /// Applies every sheet's Add/Replace decision. A saved HIIT routine has
-  /// no history depending on it, so Replace is always a plain
-  /// delete-and-reinsert of its slots (`HiitRoutineRepository.
-  /// replaceRoutine`) — unlike Workout Plan's replace below, which has to
-  /// preserve day ids for history's sake.
+  /// Applies every non-skipped sheet. Whether a given sheet becomes an Add
+  /// or a Replace is resolved fresh here by name, not carried as a user
+  /// choice from the review screen — a saved HIIT routine has no history
+  /// depending on it, so Replace is always a plain delete-and-reinsert of
+  /// its slots (`HiitRoutineRepository.replaceRoutine`), unlike Workout
+  /// Plan's replace below, which has to preserve day ids for history's
+  /// sake.
   static Future<void> commitHiitImport(
     List<HiitImportDecision> decisions,
   ) async {
     for (final d in decisions) {
+      if (d.skip) continue;
       final p = d.parsed;
       // Nothing matched at all (every exercise name in the sheet was
       // unrecognized) — reported on the review screen, but there's
       // nothing usable to actually save.
       if (p.slots.isEmpty) continue;
-      if (d.add) {
-        var name = p.name;
-        var suffix = 2;
-        while (await AppServices.hiitRoutines.getRoutineByName(name) != null) {
-          name = '${p.name} ($suffix)';
-          suffix++;
-        }
-        final routineId = await AppServices.hiitRoutines.insertRoutine(
-          HiitRoutine(
-            name: name,
-            automatic: p.automatic,
-            created: DateTime.now().toIso8601String(),
-          ),
-        );
+
+      final existing = await AppServices.hiitRoutines.getRoutineByName(p.name);
+      final routine = HiitRoutine(
+        name: p.name,
+        automatic: p.automatic,
+        created: DateTime.now().toIso8601String(),
+      );
+      if (existing != null) {
+        await AppServices.hiitRoutines.replaceRoutine(existing.id!, routine, [
+          for (final s in p.slots) _withRoutineId(s, existing.id!),
+        ]);
+      } else {
+        final routineId = await AppServices.hiitRoutines.insertRoutine(routine);
         await AppServices.hiitRoutines.insertRoutineSlots([
           for (final s in p.slots) _withRoutineId(s, routineId),
         ]);
-      } else {
-        final existing = await AppServices.hiitRoutines.getRoutineByName(
-          p.name,
-        );
-        final routine = HiitRoutine(
-          name: p.name,
-          automatic: p.automatic,
-          created: DateTime.now().toIso8601String(),
-        );
-        if (existing != null) {
-          await AppServices.hiitRoutines.replaceRoutine(existing.id!, routine, [
-            for (final s in p.slots) _withRoutineId(s, existing.id!),
-          ]);
-        } else {
-          final routineId = await AppServices.hiitRoutines.insertRoutine(
-            routine,
-          );
-          await AppServices.hiitRoutines.insertRoutineSlots([
-            for (final s in p.slots) _withRoutineId(s, routineId),
-          ]);
-        }
       }
     }
   }
@@ -653,26 +634,29 @@ abstract class PlanExportService {
     return results;
   }
 
-  /// Applies every sheet's Add/Replace decision. Unlike HIIT's replace,
-  /// Workout Plan's Replace must never delete a day
-  /// `planned_sessions.template_day_id` might already reference — that's
-  /// exactly what `WorkoutPlanRepository.replaceTemplateDays` handles
-  /// (match by position, update in place, soft-hide anything dropped).
+  /// Applies every non-skipped sheet. Whether a given sheet becomes an Add
+  /// or a Replace is resolved fresh here by name, not carried as a user
+  /// choice from the review screen. Unlike HIIT's replace, Workout Plan's
+  /// Replace must never delete a day `planned_sessions.template_day_id`
+  /// might already reference — that's exactly what
+  /// `WorkoutPlanRepository.replaceTemplateDays` handles (match by
+  /// position, update in place, soft-hide anything dropped).
   static Future<void> commitWorkoutPlanImport(
     List<WorkoutPlanImportDecision> decisions,
   ) async {
     for (final d in decisions) {
+      if (d.skip) continue;
       final p = d.parsed;
-      if (d.add) {
-        var name = p.name;
-        var suffix = 2;
-        while (await AppServices.workoutPlans.getTemplateByName(name) != null) {
-          name = '${p.name} ($suffix)';
-          suffix++;
-        }
+      final existing = await AppServices.workoutPlans.getTemplateByName(p.name);
+      if (existing != null) {
+        await AppServices.workoutPlans.replaceTemplateDays(
+          existing.id!,
+          p.days,
+        );
+      } else {
         final templateId = await AppServices.workoutPlans.insertTemplate(
           WorkoutTemplate(
-            name: name,
+            name: p.name,
             created: DateTime.now().toIso8601String(),
           ),
         );
@@ -685,33 +669,6 @@ abstract class PlanExportService {
               patterns: day.patterns,
             ),
           );
-        }
-      } else {
-        final existing = await AppServices.workoutPlans.getTemplateByName(
-          p.name,
-        );
-        if (existing != null) {
-          await AppServices.workoutPlans.replaceTemplateDays(
-            existing.id!,
-            p.days,
-          );
-        } else {
-          final templateId = await AppServices.workoutPlans.insertTemplate(
-            WorkoutTemplate(
-              name: p.name,
-              created: DateTime.now().toIso8601String(),
-            ),
-          );
-          for (final day in p.days) {
-            await AppServices.workoutPlans.insertDay(
-              WorkoutTemplateDay(
-                templateId: templateId,
-                dayOrder: day.dayOrder,
-                dayLabel: day.dayLabel,
-                patterns: day.patterns,
-              ),
-            );
-          }
         }
       }
     }
