@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../data/models/bodyweight_entry.dart';
 import '../../data/models/metric_entry.dart';
 import '../../services/app_services.dart';
+import '../../services/number_display.dart';
 import '../../services/units.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/date_picker_field.dart';
@@ -38,22 +39,27 @@ class _LogSimpleMetricFormState extends State<LogSimpleMetricForm> {
   late final _controller = TextEditingController(
     text: widget.initialValue == null
         ? ''
-        : (widget.kind == SimpleMetricKind.bodyweight
+        : NumberDisplay.trim(
+            widget.kind == SimpleMetricKind.bodyweight
                 ? Units.displayValue(widget.initialValue!)
-                : widget.initialValue!)
-            .toStringAsFixed(0),
+                : widget.initialValue!,
+          ),
   );
 
   // Sleep is entered as hours + minutes (more natural than typing "7.5")
   // but still stored as decimal hours — `MetricType.sleepHours` and every
   // downstream trend calculation are unchanged, this only touches entry.
   late final _hoursController = TextEditingController(
-    text: widget.initialValue == null ? '' : widget.initialValue!.floor().toString(),
+    text: widget.initialValue == null
+        ? ''
+        : widget.initialValue!.floor().toString(),
   );
   late final _minutesController = TextEditingController(
     text: widget.initialValue == null
         ? ''
-        : ((widget.initialValue! - widget.initialValue!.floor()) * 60).round().toString(),
+        : ((widget.initialValue! - widget.initialValue!.floor()) * 60)
+              .round()
+              .toString(),
   );
 
   bool _saving = false;
@@ -95,7 +101,9 @@ class _LogSimpleMetricFormState extends State<LogSimpleMetricForm> {
   double? get _enteredSleepHours {
     final hours = int.tryParse(_hoursController.text) ?? 0;
     final minutes = int.tryParse(_minutesController.text) ?? 0;
-    if (_hoursController.text.isEmpty && _minutesController.text.isEmpty) return null;
+    if (_hoursController.text.isEmpty && _minutesController.text.isEmpty) {
+      return null;
+    }
     return hours + minutes / 60;
   }
 
@@ -110,8 +118,11 @@ class _LogSimpleMetricFormState extends State<LogSimpleMetricForm> {
     if (widget.kind == SimpleMetricKind.bodyweight) {
       // Entered in whatever unit is currently displayed -> convert back to
       // the canonical lb storage, same as the lift-weight field.
-      final entry =
-          BodyweightEntry(id: widget.editingId, date: dateStr, weight: Units.toLb(entered));
+      final entry = BodyweightEntry(
+        id: widget.editingId,
+        date: dateStr,
+        weight: Units.toLb(entered),
+      );
       if (_isEditing) {
         await AppServices.bodyweight.update(entry);
       } else {
@@ -143,11 +154,15 @@ class _LogSimpleMetricFormState extends State<LogSimpleMetricForm> {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
       child: Container(
         decoration: const BoxDecoration(
           color: AppColors.surfaceRaised,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.card)),
+          borderRadius: BorderRadius.vertical(
+            top: Radius.circular(AppRadius.card),
+          ),
         ),
         padding: EdgeInsets.fromLTRB(
           AppSpacing.edge,
@@ -193,7 +208,9 @@ class _LogSimpleMetricFormState extends State<LogSimpleMetricForm> {
               TextField(
                 controller: _controller,
                 autofocus: true,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
                 style: AppText.bodyText,
                 decoration: InputDecoration(labelText: _label),
               ),
@@ -206,15 +223,19 @@ class _LogSimpleMetricFormState extends State<LogSimpleMetricForm> {
                   backgroundColor: AppColors.accent,
                   foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(AppRadius.button)),
+                    borderRadius: BorderRadius.circular(AppRadius.button),
+                  ),
                 ),
                 onPressed: _saving ? null : _submit,
                 child: _saving
                     ? const SizedBox(
                         width: 20,
                         height: 20,
-                        child:
-                            CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
                     : const Text('Save'),
               ),
             ),

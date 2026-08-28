@@ -1,3 +1,5 @@
+import '../../services/number_display.dart';
+
 /// How a [CustomMetric]'s entries are captured and displayed — the "metric
 /// builder"'s 3 input shapes, chosen once when the metric is created.
 enum CustomMetricKind { number, scale, classes }
@@ -132,9 +134,7 @@ class CustomMetric {
   String formatValue(double value) {
     switch (kind) {
       case CustomMetricKind.number:
-        return value == value.roundToDouble()
-            ? value.round().toString()
-            : value.toStringAsFixed(1);
+        return NumberDisplay.trim(value);
       case CustomMetricKind.scale:
         return '${value.round()}/${scaleMax ?? 5}';
       case CustomMetricKind.classes:

@@ -5,6 +5,7 @@ import '../../data/models/lift_set.dart';
 import '../../data/repositories/lift_repository.dart';
 import '../../services/app_services.dart';
 import '../../services/effort_display.dart';
+import '../../services/number_display.dart';
 import '../../services/units.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/date_picker_field.dart';
@@ -35,8 +36,9 @@ class EditLiftSessionForm extends StatefulWidget {
 
 class _EditLiftSessionFormState extends State<EditLiftSessionForm> {
   late DateTime _date = DateTime.parse(widget.sessionWithSets.session.date);
-  late final _notesController =
-      TextEditingController(text: widget.sessionWithSets.session.notes ?? '');
+  late final _notesController = TextEditingController(
+    text: widget.sessionWithSets.session.notes ?? '',
+  );
   late final List<_EditableSet> _sets = widget.sessionWithSets.sets
       .map((s) => _EditableSet(reps: s.reps, weightLb: s.weight, rpe: s.rpe))
       .toList();
@@ -67,8 +69,10 @@ class _EditLiftSessionFormState extends State<EditLiftSessionForm> {
       // Re-point at the instance from `all` itself (not the original
       // `widget.exercise`) — a fresh DB fetch never returns the same object
       // instance twice, and this screen otherwise carries the stale one.
-      _selectedExercise =
-          all.firstWhere((e) => e.id == widget.exercise.id, orElse: () => widget.exercise);
+      _selectedExercise = all.firstWhere(
+        (e) => e.id == widget.exercise.id,
+        orElse: () => widget.exercise,
+      );
     });
   }
 
@@ -81,21 +85,27 @@ class _EditLiftSessionFormState extends State<EditLiftSessionForm> {
   Future<void> _save() async {
     setState(() => _saving = true);
     final dateStr = _date.toIso8601String().substring(0, 10);
-    await AppServices.lifts.updateSession(widget.sessionWithSets.session.copyWith(
-      exerciseId: _selectedExercise.id,
-      date: dateStr,
-      notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
-    ));
+    await AppServices.lifts.updateSession(
+      widget.sessionWithSets.session.copyWith(
+        exerciseId: _selectedExercise.id,
+        date: dateStr,
+        notes: _notesController.text.trim().isEmpty
+            ? null
+            : _notesController.text.trim(),
+      ),
+    );
     await AppServices.lifts.replaceSets(
       widget.sessionWithSets.session.id!,
       _sets
-          .map((s) => LiftSet(
-                sessionId: 0,
-                setNumber: 0,
-                reps: s.reps,
-                weight: s.weightLb,
-                rpe: s.rpe,
-              ))
+          .map(
+            (s) => LiftSet(
+              sessionId: 0,
+              setNumber: 0,
+              reps: s.reps,
+              weight: s.weightLb,
+              rpe: s.rpe,
+            ),
+          )
           .toList(),
     );
     AppServices.signalReload();
@@ -119,7 +129,10 @@ class _EditLiftSessionFormState extends State<EditLiftSessionForm> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete', style: TextStyle(color: AppColors.accent)),
+            child: const Text(
+              'Delete',
+              style: TextStyle(color: AppColors.accent),
+            ),
           ),
         ],
       ),
@@ -134,7 +147,9 @@ class _EditLiftSessionFormState extends State<EditLiftSessionForm> {
   Widget build(BuildContext context) {
     final screenHeight = MediaQuery.of(context).size.height;
     return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
       child: Container(
         constraints: BoxConstraints(
           minHeight: screenHeight * 0.5,
@@ -142,7 +157,9 @@ class _EditLiftSessionFormState extends State<EditLiftSessionForm> {
         ),
         decoration: const BoxDecoration(
           color: AppColors.surfaceRaised,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.card)),
+          borderRadius: BorderRadius.vertical(
+            top: Radius.circular(AppRadius.card),
+          ),
         ),
         padding: EdgeInsets.fromLTRB(
           AppSpacing.edge,
@@ -174,7 +191,10 @@ class _EditLiftSessionFormState extends State<EditLiftSessionForm> {
                   onSelected: (e) => setState(() => _selectedExercise = e),
                 ),
               const SizedBox(height: AppSpacing.standard),
-              DatePickerField(date: _date, onChanged: (d) => setState(() => _date = d)),
+              DatePickerField(
+                date: _date,
+                onChanged: (d) => setState(() => _date = d),
+              ),
               const SizedBox(height: AppSpacing.large),
               ...List.generate(_sets.length, (i) => _buildSetRow(i)),
               const SizedBox(height: AppSpacing.small),
@@ -184,10 +204,14 @@ class _EditLiftSessionFormState extends State<EditLiftSessionForm> {
                   foregroundColor: AppColors.textPrimary,
                   minimumSize: const Size(double.infinity, 44),
                 ),
-                onPressed: () => setState(() => _sets.add(_EditableSet(
+                onPressed: () => setState(
+                  () => _sets.add(
+                    _EditableSet(
                       reps: _sets.isEmpty ? 5 : _sets.last.reps,
                       weightLb: _sets.isEmpty ? 45 : _sets.last.weightLb,
-                    ))),
+                    ),
+                  ),
+                ),
                 icon: const Icon(Icons.add),
                 label: const Text('Add another set'),
               ),
@@ -196,7 +220,9 @@ class _EditLiftSessionFormState extends State<EditLiftSessionForm> {
                 controller: _notesController,
                 style: AppText.bodyText,
                 maxLines: 2,
-                decoration: const InputDecoration(labelText: 'Notes (optional)'),
+                decoration: const InputDecoration(
+                  labelText: 'Notes (optional)',
+                ),
               ),
               const SizedBox(height: AppSpacing.large),
               SizedBox(
@@ -207,7 +233,8 @@ class _EditLiftSessionFormState extends State<EditLiftSessionForm> {
                     backgroundColor: AppColors.accent,
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(AppRadius.button)),
+                      borderRadius: BorderRadius.circular(AppRadius.button),
+                    ),
                   ),
                   onPressed: _saving ? null : _save,
                   child: _saving
@@ -215,7 +242,10 @@ class _EditLiftSessionFormState extends State<EditLiftSessionForm> {
                           width: 20,
                           height: 20,
                           child: CircularProgressIndicator(
-                              strokeWidth: 2, color: Colors.white))
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
                       : const Text('Save'),
                 ),
               ),
@@ -251,7 +281,9 @@ class _EditLiftSessionFormState extends State<EditLiftSessionForm> {
             visualDensity: VisualDensity.compact,
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(),
-            onPressed: _sets.length <= 1 ? null : () => setState(() => _sets.removeAt(i)),
+            onPressed: _sets.length <= 1
+                ? null
+                : () => setState(() => _sets.removeAt(i)),
             icon: const Icon(Icons.remove_circle_outline, size: 18),
             color: AppColors.textSecondary,
             disabledColor: AppColors.border,
@@ -271,10 +303,16 @@ class _EditLiftSessionFormState extends State<EditLiftSessionForm> {
           Expanded(
             child: TextFormField(
               key: ValueKey('weight_$i'),
-              initialValue: Units.displayValue(set.weightLb).toStringAsFixed(0),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              initialValue: NumberDisplay.trim(
+                Units.displayValue(set.weightLb),
+              ),
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
               style: AppText.bodyText,
-              decoration: InputDecoration(labelText: 'Weight (${Units.suffix})'),
+              decoration: InputDecoration(
+                labelText: 'Weight (${Units.suffix})',
+              ),
               onChanged: (v) {
                 final entered = double.tryParse(v);
                 if (entered != null) set.weightLb = Units.toLb(entered);
@@ -285,17 +323,25 @@ class _EditLiftSessionFormState extends State<EditLiftSessionForm> {
           Expanded(
             child: TextFormField(
               key: ValueKey('rpe_$i'),
-              initialValue:
-                  set.rpe != null ? EffortDisplay.toDisplay(set.rpe!).toStringAsFixed(0) : '',
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              initialValue: set.rpe != null
+                  ? EffortDisplay.toDisplay(set.rpe!).toStringAsFixed(0)
+                  : '',
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
               style: AppText.bodyText,
               decoration: InputDecoration(
                 labelText: 'Reps left',
-                suffixIcon: const InfoTooltip(glossaryKey: 'rpe', title: 'Reps left'),
+                suffixIcon: const InfoTooltip(
+                  glossaryKey: 'rpe',
+                  title: 'Reps left',
+                ),
               ),
               onChanged: (v) {
                 final entered = double.tryParse(v);
-                set.rpe = entered == null ? null : EffortDisplay.fromDisplay(entered);
+                set.rpe = entered == null
+                    ? null
+                    : EffortDisplay.fromDisplay(entered);
               },
             ),
           ),

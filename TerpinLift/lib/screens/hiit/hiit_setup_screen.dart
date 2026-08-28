@@ -12,6 +12,7 @@ import '../../data/models/hiit_session.dart';
 import '../../data/models/hiit_slot.dart';
 import '../../services/app_services.dart';
 import '../../services/cardio_units.dart';
+import '../../services/number_display.dart';
 import '../../services/plan_export_service.dart';
 import '../../services/units.dart';
 import '../../theme/app_theme.dart';
@@ -790,7 +791,7 @@ class _HiitSetupScreenState extends State<HiitSetupScreen> {
                 key: ValueKey('weight_${slot.hashCode}'),
                 initialValue: slot.weight == null
                     ? ''
-                    : Units.displayValue(slot.weight!).toStringAsFixed(0),
+                    : NumberDisplay.trim(Units.displayValue(slot.weight!)),
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
                 ),

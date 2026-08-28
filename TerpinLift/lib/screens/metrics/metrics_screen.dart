@@ -11,6 +11,7 @@ import '../../services/home_trend_settings.dart';
 import '../../services/metric_chart_points.dart';
 import '../../services/metric_layout_settings.dart';
 import '../../services/muscle_map.dart';
+import '../../services/number_display.dart';
 import '../../services/trend_engine.dart';
 import '../../services/units.dart';
 import '../../services/user_profile.dart';
@@ -168,7 +169,7 @@ class _MetricsScreenState extends State<MetricsScreen>
           .map(
             (e) => MetricHistoryRow(
               date: e.date,
-              valueText: e.value.round().toString(),
+              valueText: NumberDisplay.trim(e.value),
               onEdit: () => _editSimpleMetric(SimpleMetricKind.steps, e),
             ),
           )
@@ -179,7 +180,7 @@ class _MetricsScreenState extends State<MetricsScreen>
           .map(
             (e) => MetricHistoryRow(
               date: e.date,
-              valueText: '${e.value.toStringAsFixed(1)} hrs',
+              valueText: '${NumberDisplay.trim(e.value)} hrs',
               onEdit: () => _editSimpleMetric(SimpleMetricKind.sleep, e),
             ),
           )
@@ -670,7 +671,7 @@ class _MetricsScreenState extends State<MetricsScreen>
         return _metricCard(
           'Steps',
           _points(MetricType.steps, cutoff),
-          showPrediction: true,
+          showPrediction: item.showPrediction,
           trendWindowDays: 21,
           onAdd: () => _logSimpleMetric(SimpleMetricKind.steps),
           onHistory: () => _showMetricHistory('Steps', _stepsHistoryRows()),
@@ -708,7 +709,7 @@ class _MetricsScreenState extends State<MetricsScreen>
           item.dailyView
               ? _dailyBodyweightPoints(cutoff)
               : _weeklyBodyweightPoints(cutoff),
-          showPrediction: true,
+          showPrediction: item.showPrediction,
           trendWindowDays: 42,
           yFormatter: (v) => Units.formatMaskable(v),
           onAdd: () => _logSimpleMetric(SimpleMetricKind.bodyweight),
@@ -998,7 +999,7 @@ class _MetricsScreenState extends State<MetricsScreen>
     final order = [..._currentMetricOrder];
     final i = order.indexOf(item);
     if (i == -1) return;
-    final result = await showModalBottomSheet<(int?, bool, bool)>(
+    final result = await showModalBottomSheet<(int?, bool, bool, bool)>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -1010,14 +1011,17 @@ class _MetricsScreenState extends State<MetricsScreen>
         showGoal: item.showGoal,
         hasDailyToggle: item.type == MetricWidgetId.weight,
         dailyView: item.dailyView,
+        hasPredictionToggle: item.type.hasPrediction,
+        showPrediction: item.showPrediction,
       ),
     );
     if (result == null) return;
-    final (monthsOverride, showGoal, dailyView) = result;
+    final (monthsOverride, showGoal, dailyView, showPrediction) = result;
     order[i] = item.copyWith(
       monthsOverride: () => monthsOverride,
       showGoal: showGoal,
       dailyView: dailyView,
+      showPrediction: showPrediction,
     );
     await _persistMetricOrder(order);
   }
@@ -1121,7 +1125,7 @@ class _MetricsScreenState extends State<MetricsScreen>
             sortKey: e.loggedAt ?? e.date,
             icon: Icons.directions_walk,
             label: 'Steps',
-            valueText: e.value.round().toString(),
+            valueText: NumberDisplay.trim(e.value),
             onEdit: () => _editSimpleMetric(SimpleMetricKind.steps, e),
           ),
         );
@@ -1132,7 +1136,7 @@ class _MetricsScreenState extends State<MetricsScreen>
             sortKey: e.loggedAt ?? e.date,
             icon: Icons.bed,
             label: 'Sleep',
-            valueText: '${e.value.toStringAsFixed(1)} hrs',
+            valueText: '${NumberDisplay.trim(e.value)} hrs',
             onEdit: () => _editSimpleMetric(SimpleMetricKind.sleep, e),
           ),
         );

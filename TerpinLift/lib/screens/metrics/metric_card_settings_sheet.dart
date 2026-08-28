@@ -14,6 +14,13 @@ import '../../widgets/time_frame_dropdown.dart';
 /// bodyweight (2026-07-27, user's own explicit request) — defaults off
 /// (weekly average, unchanged prior behavior) and only reachable through
 /// this same edit-mode gear, not a casual toggle.
+///
+/// [hasPredictionToggle] shows for any card type with a prediction-extension
+/// concept at all (steps, weight — see `MetricWidgetIdKey.hasPrediction`).
+/// Defaults on (unchanged prior behavior: real data stops early and the
+/// remaining chart width is reserved for the trend); switching it off fills
+/// the chart's full width with real data instead, like a card with no
+/// prediction concept (e.g. sleep) already renders.
 class MetricCardSettingsSheet extends StatefulWidget {
   final String title;
   final bool hasTimeFrame;
@@ -22,6 +29,8 @@ class MetricCardSettingsSheet extends StatefulWidget {
   final bool showGoal;
   final bool hasDailyToggle;
   final bool dailyView;
+  final bool hasPredictionToggle;
+  final bool showPrediction;
 
   const MetricCardSettingsSheet({
     super.key,
@@ -32,6 +41,8 @@ class MetricCardSettingsSheet extends StatefulWidget {
     required this.showGoal,
     this.hasDailyToggle = false,
     this.dailyView = false,
+    this.hasPredictionToggle = false,
+    this.showPrediction = true,
   });
 
   @override
@@ -43,12 +54,14 @@ class _MetricCardSettingsSheetState extends State<MetricCardSettingsSheet> {
   late int _months = widget.monthsOverride ?? 0;
   late bool _showGoal = widget.showGoal;
   late bool _dailyView = widget.dailyView;
+  late bool _showPrediction = widget.showPrediction;
 
   void _save() {
     Navigator.pop(context, (
       _months == 0 ? null : _months,
       _showGoal,
       _dailyView,
+      _showPrediction,
     ));
   }
 
@@ -130,6 +143,29 @@ class _MetricCardSettingsSheetState extends State<MetricCardSettingsSheet> {
                     value: _dailyView,
                     activeThumbColor: AppColors.accent,
                     onChanged: (v) => setState(() => _dailyView = v),
+                  ),
+                ],
+              ),
+            ],
+            if (widget.hasPredictionToggle) ...[
+              const SizedBox(height: AppSpacing.standard),
+              Row(
+                children: [
+                  Icon(
+                    _showPrediction
+                        ? Icons.trending_up
+                        : Icons.show_chart_outlined,
+                    size: 18,
+                    color: AppColors.textSecondary,
+                  ),
+                  const SizedBox(width: AppSpacing.small),
+                  Expanded(
+                    child: Text('Show predictions', style: AppText.bodyText),
+                  ),
+                  Switch(
+                    value: _showPrediction,
+                    activeThumbColor: AppColors.accent,
+                    onChanged: (v) => setState(() => _showPrediction = v),
                   ),
                 ],
               ),

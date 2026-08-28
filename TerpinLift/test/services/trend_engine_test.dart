@@ -11,36 +11,33 @@ PlannedSession _plannedSession(
   required String startedAt,
   String? completedAt,
   PlannedSessionStatus status = PlannedSessionStatus.completed,
-}) =>
-    PlannedSession(
-      templateDayId: 1,
-      date: date,
-      startedAt: startedAt,
-      completedAt: completedAt,
-      status: status,
-    );
+}) => PlannedSession(
+  templateDayId: 1,
+  date: date,
+  startedAt: startedAt,
+  completedAt: completedAt,
+  status: status,
+);
 
 SessionWithSets _session(String date, List<LiftSet> sets) =>
     SessionWithSets(LiftSession(exerciseId: 1, date: date), sets);
 
-SessionWithSets _timedSession(String date, {String? startedAt, String? completedAt}) =>
-    SessionWithSets(
-      LiftSession(
-        exerciseId: 1,
-        date: date,
-        startedAt: startedAt,
-        completedAt: completedAt,
-      ),
-      [],
-    );
+SessionWithSets _timedSession(
+  String date, {
+  String? startedAt,
+  String? completedAt,
+}) => SessionWithSets(
+  LiftSession(
+    exerciseId: 1,
+    date: date,
+    startedAt: startedAt,
+    completedAt: completedAt,
+  ),
+  [],
+);
 
-LiftSet _set({required double weight, int reps = 5, double? rpe}) => LiftSet(
-      sessionId: 1,
-      setNumber: 0,
-      reps: reps,
-      weight: weight,
-      rpe: rpe,
-    );
+LiftSet _set({required double weight, int reps = 5, double? rpe}) =>
+    LiftSet(sessionId: 1, setNumber: 0, reps: reps, weight: weight, rpe: rpe);
 
 void main() {
   group('TrendEngine.predictedOneRepMax', () {
@@ -53,32 +50,92 @@ void main() {
       expect(TrendEngine.predictedOneRepMax(sessions), isNull);
     });
 
-    test('a multi-rep set projects lower for female than male (flatter divisor)', () {
-      final sessions = [_session('2026-07-05', [_set(weight: 100, reps: 4)])];
-      final female = TrendEngine.predictedOneRepMax(sessions, gender: Gender.female);
-      final male = TrendEngine.predictedOneRepMax(sessions, gender: Gender.male);
-      expect(female, lessThan(male!));
-    });
+    test(
+      'a multi-rep set projects lower for female than male (flatter divisor)',
+      () {
+        final sessions = [
+          _session('2026-07-05', [_set(weight: 100, reps: 4)]),
+        ];
+        final female = TrendEngine.predictedOneRepMax(
+          sessions,
+          gender: Gender.female,
+        );
+        final male = TrendEngine.predictedOneRepMax(
+          sessions,
+          gender: Gender.male,
+        );
+        expect(female, lessThan(male!));
+      },
+    );
 
-    test('a true 1-rep set is unaffected by gender — no rep-conversion to scale', () {
-      final sessions = [_session('2026-07-05', [_set(weight: 100, reps: 1)])];
-      final female = TrendEngine.predictedOneRepMax(sessions, gender: Gender.female);
-      final male = TrendEngine.predictedOneRepMax(sessions, gender: Gender.male);
-      expect(female, closeTo(male!, 0.001));
-    });
+    test(
+      'a true 1-rep set is unaffected by gender — no rep-conversion to scale',
+      () {
+        final sessions = [
+          _session('2026-07-05', [_set(weight: 100, reps: 1)]),
+        ];
+        final female = TrendEngine.predictedOneRepMax(
+          sessions,
+          gender: Gender.female,
+        );
+        final male = TrendEngine.predictedOneRepMax(
+          sessions,
+          gender: Gender.male,
+        );
+        expect(female, closeTo(male!, 0.001));
+      },
+    );
 
-    test('no time decay — an old single session is used at full value, not tapered', () {
-      final sessions = [_session('2020-01-01', [_set(weight: 200, reps: 1)])];
-      expect(TrendEngine.predictedOneRepMax(sessions), 200);
-    });
+    test(
+      'no time decay — an old single session is used at full value, not tapered',
+      () {
+        final sessions = [
+          _session('2020-01-01', [_set(weight: 200, reps: 1)]),
+        ];
+        expect(TrendEngine.predictedOneRepMax(sessions), 200);
+      },
+    );
 
-    test('takes the best of the last 3 sessions, not just the single most recent', () {
+    test(
+      'takes the best of the last 3 sessions, not just the single most recent',
+      () {
+        final sessions = [
+          _session('2026-07-05', [
+            _set(weight: 100, reps: 1),
+          ]), // light/off day, most recent
+          _session('2026-07-03', [
+            _set(weight: 205, reps: 1),
+          ]), // the real recent best
+          _session('2026-07-01', [_set(weight: 200, reps: 1)]),
+        ];
+        expect(TrendEngine.predictedOneRepMax(sessions), 205);
+      },
+    );
+
+    test('precision matches the recently logged weights, not the raw Epley '
+        'math — whole-number history predicts a whole number', () {
       final sessions = [
-        _session('2026-07-05', [_set(weight: 100, reps: 1)]), // light/off day, most recent
-        _session('2026-07-03', [_set(weight: 205, reps: 1)]), // the real recent best
-        _session('2026-07-01', [_set(weight: 200, reps: 1)]),
+        _session('2026-07-05', [_set(weight: 100, reps: 4)]),
       ];
-      expect(TrendEngine.predictedOneRepMax(sessions), 205);
+      final result = TrendEngine.predictedOneRepMax(
+        sessions,
+        gender: Gender.male,
+      );
+      // 100 * (1 + 4/30) = 113.333...; history is all whole numbers.
+      expect(result, 113);
+    });
+
+    test('precision matches the recently logged weights when they include a '
+        'decimal', () {
+      final sessions = [
+        _session('2026-07-05', [_set(weight: 100.5, reps: 4)]),
+      ];
+      final result = TrendEngine.predictedOneRepMax(
+        sessions,
+        gender: Gender.male,
+      );
+      // 100.5 * (1 + 4/30) = 113.9; history has 1 decimal.
+      expect(result, closeTo(113.9, 0.001));
     });
   });
 
@@ -92,52 +149,112 @@ void main() {
       expect(TrendEngine.predictNextAtCharacteristicReps(sessions), isNull);
     });
 
-    test('a single data point: goal equals that weight, at the widest confidence band', () {
-      final sessions = [_session('2026-07-05', [_set(weight: 100, reps: 4)])];
-      final result = TrendEngine.predictNextAtCharacteristicReps(sessions)!;
-      expect(result.reps, 4);
-      expect(result.goal, 100);
-      expect(result.high - result.low, closeTo(80.0, 0.001)); // +/-40 ceiling at n=1
-      expect(result.sampleSize, 1);
-    });
+    test(
+      'a single data point: goal equals that weight, at the widest confidence band',
+      () {
+        final sessions = [
+          _session('2026-07-05', [_set(weight: 100, reps: 4)]),
+        ];
+        final result = TrendEngine.predictNextAtCharacteristicReps(sessions)!;
+        expect(result.reps, 4);
+        expect(result.goal, 100);
+        expect(
+          result.high - result.low,
+          closeTo(80.0, 0.001),
+        ); // +/-40 ceiling at n=1
+        expect(result.sampleSize, 1);
+      },
+    );
 
-    test('projects the next weight as last + average recent delta at the same rep count', () {
-      final sessions = [
-        _session('2026-07-05', [_set(weight: 100, reps: 4)]),
-        _session('2026-07-03', [_set(weight: 95, reps: 4)]),
-        _session('2026-07-01', [_set(weight: 90, reps: 4)]),
-      ];
-      final result = TrendEngine.predictNextAtCharacteristicReps(sessions)!;
-      expect(result.reps, 4);
-      expect(result.goal, closeTo(105.0, 0.001)); // 100 + avg(5, 5)
-      expect(result.sampleSize, 3);
-    });
+    test(
+      'projects the next weight as last + average recent delta at the same rep count',
+      () {
+        final sessions = [
+          _session('2026-07-05', [_set(weight: 100, reps: 4)]),
+          _session('2026-07-03', [_set(weight: 95, reps: 4)]),
+          _session('2026-07-01', [_set(weight: 90, reps: 4)]),
+        ];
+        final result = TrendEngine.predictNextAtCharacteristicReps(sessions)!;
+        expect(result.reps, 4);
+        expect(result.goal, closeTo(105.0, 0.001)); // 100 + avg(5, 5)
+        expect(result.sampleSize, 3);
+      },
+    );
 
-    test('characteristic reps is the mode of each session\'s heaviest-set rep count, and only '
-        'matching sets feed the projection', () {
-      final sessions = [
-        // Most recent session's heaviest set is 8 reps — doesn't match the
-        // mode (4), so it's skipped for the same-rep history entirely.
-        _session('2026-07-05', [_set(weight: 60, reps: 8)]),
-        _session('2026-07-03', [_set(weight: 100, reps: 4)]),
-        _session('2026-07-01', [_set(weight: 95, reps: 4)]),
-      ];
-      final result = TrendEngine.predictNextAtCharacteristicReps(sessions)!;
-      expect(result.reps, 4);
-      expect(result.goal, closeTo(105.0, 0.001)); // 100 (most recent 4-rep entry) + 5
-      expect(result.sampleSize, 2);
-    });
+    test(
+      'characteristic reps is the mode of each session\'s heaviest-set rep count, and only '
+      'matching sets feed the projection',
+      () {
+        final sessions = [
+          // Most recent session's heaviest set is 8 reps — doesn't match the
+          // mode (4), so it's skipped for the same-rep history entirely.
+          _session('2026-07-05', [_set(weight: 60, reps: 8)]),
+          _session('2026-07-03', [_set(weight: 100, reps: 4)]),
+          _session('2026-07-01', [_set(weight: 95, reps: 4)]),
+        ];
+        final result = TrendEngine.predictNextAtCharacteristicReps(sessions)!;
+        expect(result.reps, 4);
+        expect(
+          result.goal,
+          closeTo(105.0, 0.001),
+        ); // 100 (most recent 4-rep entry) + 5
+        expect(result.sampleSize, 2);
+      },
+    );
 
     test('confidence band narrows as same-rep history accumulates', () {
-      final sparse = [_session('2026-07-05', [_set(weight: 100, reps: 4)])];
+      final sparse = [
+        _session('2026-07-05', [_set(weight: 100, reps: 4)]),
+      ];
       final rich = [
         for (var i = 0; i < 16; i++)
-          _session('2026-0${1 + i ~/ 28}-${1 + i % 28}', [_set(weight: 100, reps: 4)]),
+          _session('2026-0${1 + i ~/ 28}-${1 + i % 28}', [
+            _set(weight: 100, reps: 4),
+          ]),
       ];
       final sparseBand = TrendEngine.predictNextAtCharacteristicReps(sparse)!;
       final richBand = TrendEngine.predictNextAtCharacteristicReps(rich)!;
-      expect(sparseBand.high - sparseBand.low, greaterThan(richBand.high - richBand.low));
-      expect(richBand.high - richBand.low, closeTo(20.0, 0.001)); // 2 * (40/sqrt(16))
+      expect(
+        sparseBand.high - sparseBand.low,
+        greaterThan(richBand.high - richBand.low),
+      );
+      expect(
+        richBand.high - richBand.low,
+        closeTo(20.0, 0.001),
+      ); // 2 * (40/sqrt(16))
+    });
+
+    test('predicted goal/low/high match the precision of the real same-rep '
+        'history, not whatever raw digits the averaging produces — a history '
+        'of 100, 102.5, 105 predicts one more decimal place, not a '
+        'falsely-precise repeating decimal', () {
+      final sessions = [
+        _session('2026-07-05', [_set(weight: 105, reps: 4)]),
+        _session('2026-07-03', [_set(weight: 102.5, reps: 4)]),
+        _session('2026-07-01', [_set(weight: 100, reps: 4)]),
+      ];
+      final result = TrendEngine.predictNextAtCharacteristicReps(sessions)!;
+      // avg delta = (2.5 + 2.5) / 2 = 2.5, goal = 105 + 2.5 = 107.5 —
+      // already lands on 1 decimal here, but the point is the *rounding
+      // rule* itself: it's derived from the history's own precision (1),
+      // not left at whatever the raw math produces.
+      expect(result.goal, closeTo(107.5, 0.001));
+      // Confirms rounding actually happened to 1 decimal, not more —
+      // band math involves a sqrt, which would otherwise leave long
+      // trailing digits on low/high.
+      expect((result.low * 10).roundToDouble() / 10, closeTo(result.low, 1e-9));
+    });
+
+    test('a same-rep history that is all whole numbers predicts a whole '
+        'number, even though the averaging math itself uses fractions', () {
+      final sessions = [
+        _session('2026-07-05', [_set(weight: 3, reps: 4)]),
+        _session('2026-07-03', [_set(weight: 2, reps: 4)]),
+        _session('2026-07-01', [_set(weight: 1, reps: 4)]),
+      ];
+      final result = TrendEngine.predictNextAtCharacteristicReps(sessions)!;
+      expect(result.goal, 4); // 3 + avg(1, 1) = 4, exactly whole
+      expect(result.goal, result.goal.roundToDouble());
     });
 
     test('a bodyweight-adjusted loadOf selector is honored', () {
@@ -147,9 +264,15 @@ void main() {
       ];
       const bodyweightLb = 150.0;
       double loadOf(LiftSet s) => bodyweightLb + s.weight;
-      final result = TrendEngine.predictNextAtCharacteristicReps(sessions, loadOf: loadOf)!;
+      final result = TrendEngine.predictNextAtCharacteristicReps(
+        sessions,
+        loadOf: loadOf,
+      )!;
       expect(result.reps, 8);
-      expect(result.goal, greaterThan(100)); // in the bodyweight-plus-a-little range, not ~5
+      expect(
+        result.goal,
+        greaterThan(100),
+      ); // in the bodyweight-plus-a-little range, not ~5
     });
   });
 
@@ -170,7 +293,10 @@ void main() {
           completedAt: '2026-07-10T10:45:00',
         ),
       ];
-      expect(TrendEngine.workoutDurationMinutesByDate(sessions)['2026-07-10'], 45);
+      expect(
+        TrendEngine.workoutDurationMinutesByDate(sessions)['2026-07-10'],
+        45,
+      );
     });
 
     test('multiple sessions on the same date sum together', () {
@@ -186,43 +312,52 @@ void main() {
           completedAt: '2026-07-10T11:15:00',
         ),
       ];
-      expect(TrendEngine.workoutDurationMinutesByDate(sessions)['2026-07-10'], 35);
-    });
-
-    test('a non-positive duration (bad data/clock skew) is dropped, not treated as 0', () {
-      final sessions = [
-        _timedSession(
-          '2026-07-10',
-          startedAt: '2026-07-10T10:30:00',
-          completedAt: '2026-07-10T10:00:00',
-        ),
-      ];
-      expect(TrendEngine.workoutDurationMinutesByDate(sessions), isEmpty);
+      expect(
+        TrendEngine.workoutDurationMinutesByDate(sessions)['2026-07-10'],
+        35,
+      );
     });
 
     test(
-        'a completed planned session overrides the lift-session sum for its date, '
-        'not adds to it', () {
-      final sessions = [
-        _timedSession(
-          '2026-07-10',
-          startedAt: '2026-07-10T18:00:00',
-          completedAt: '2026-07-10T18:15:00', // a quick data-entry window, not the real length
-        ),
-      ];
-      final plannedSessions = [
-        _plannedSession(
-          '2026-07-10',
-          startedAt: '2026-07-10T19:00:00',
-          completedAt: '2026-07-10T20:30:00', // the real 90-minute workout
-        ),
-      ];
-      final result = TrendEngine.workoutDurationMinutesByDate(
-        sessions,
-        plannedSessions: plannedSessions,
-      );
-      expect(result['2026-07-10'], 90);
-    });
+      'a non-positive duration (bad data/clock skew) is dropped, not treated as 0',
+      () {
+        final sessions = [
+          _timedSession(
+            '2026-07-10',
+            startedAt: '2026-07-10T10:30:00',
+            completedAt: '2026-07-10T10:00:00',
+          ),
+        ];
+        expect(TrendEngine.workoutDurationMinutesByDate(sessions), isEmpty);
+      },
+    );
+
+    test(
+      'a completed planned session overrides the lift-session sum for its date, '
+      'not adds to it',
+      () {
+        final sessions = [
+          _timedSession(
+            '2026-07-10',
+            startedAt: '2026-07-10T18:00:00',
+            completedAt:
+                '2026-07-10T18:15:00', // a quick data-entry window, not the real length
+          ),
+        ];
+        final plannedSessions = [
+          _plannedSession(
+            '2026-07-10',
+            startedAt: '2026-07-10T19:00:00',
+            completedAt: '2026-07-10T20:30:00', // the real 90-minute workout
+          ),
+        ];
+        final result = TrendEngine.workoutDurationMinutesByDate(
+          sessions,
+          plannedSessions: plannedSessions,
+        );
+        expect(result['2026-07-10'], 90);
+      },
+    );
 
     test('an active (not yet completed) planned session is ignored', () {
       final plannedSessions = [
@@ -239,27 +374,30 @@ void main() {
       expect(result, isEmpty);
     });
 
-    test('a date with no planned session still falls back to the lift-session sum', () {
-      final sessions = [
-        _timedSession(
-          '2026-07-11',
-          startedAt: '2026-07-11T10:00:00',
-          completedAt: '2026-07-11T10:20:00',
-        ),
-      ];
-      final plannedSessions = [
-        _plannedSession(
-          '2026-07-10',
-          startedAt: '2026-07-10T19:00:00',
-          completedAt: '2026-07-10T20:30:00',
-        ),
-      ];
-      final result = TrendEngine.workoutDurationMinutesByDate(
-        sessions,
-        plannedSessions: plannedSessions,
-      );
-      expect(result['2026-07-11'], 20);
-      expect(result['2026-07-10'], 90);
-    });
+    test(
+      'a date with no planned session still falls back to the lift-session sum',
+      () {
+        final sessions = [
+          _timedSession(
+            '2026-07-11',
+            startedAt: '2026-07-11T10:00:00',
+            completedAt: '2026-07-11T10:20:00',
+          ),
+        ];
+        final plannedSessions = [
+          _plannedSession(
+            '2026-07-10',
+            startedAt: '2026-07-10T19:00:00',
+            completedAt: '2026-07-10T20:30:00',
+          ),
+        ];
+        final result = TrendEngine.workoutDurationMinutesByDate(
+          sessions,
+          plannedSessions: plannedSessions,
+        );
+        expect(result['2026-07-11'], 20);
+        expect(result['2026-07-10'], 90);
+      },
+    );
   });
 }

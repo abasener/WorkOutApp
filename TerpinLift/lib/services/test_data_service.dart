@@ -1015,6 +1015,19 @@ class TestDataService {
     });
   }
 
+  /// Most lifts round to the nearest 5lb plate jump, same as ever — but a
+  /// couple of commonly micro-plated lifts (bench, overhead press) round to
+  /// the nearest 2.5lb instead, so the demo data actually contains real
+  /// decimal weights somewhere. Otherwise every demo weight was always a
+  /// whole multiple of 5, which meant nothing in the seeded data could ever
+  /// exercise the decimal-precision display fix (`NumberDisplay`/
+  /// `Units.format`) — this app's own test data was accidentally the worst
+  /// possible case for checking it actually works.
+  static const _plateIncrementByExercise = {
+    'Bench Press': 2.5,
+    'Overhead Press': 2.5,
+  };
+
   static Future<void> _logLift(
     Exercise exercise,
     double progress,
@@ -1024,6 +1037,7 @@ class TestDataService {
   }) async {
     final baseline = _startingWeights[exercise.name] ?? 100.0;
     final workingWeight = baseline * (1 + _growthCurve(progress) * amplitude);
+    final increment = _plateIncrementByExercise[exercise.name] ?? 5.0;
 
     final roll = forceRecovery ? 0.2 : _rand.nextDouble();
     List<LiftSet> sets;
@@ -1036,6 +1050,7 @@ class TestDataService {
         repsMax: 3,
         rpeMin: 9,
         rpeMax: 10,
+        increment: increment,
       );
     } else if (roll < 0.30) {
       // Recovery/light day: the "70/30% effort" case that shouldn't read as a strength loss.
@@ -1046,6 +1061,7 @@ class TestDataService {
         repsMax: 8,
         rpeMin: 3,
         rpeMax: 5,
+        increment: increment,
       );
     } else {
       // Normal working day.
@@ -1056,6 +1072,7 @@ class TestDataService {
         repsMax: 6,
         rpeMin: 6,
         rpeMax: 8,
+        increment: increment,
       );
     }
 
@@ -1104,9 +1121,10 @@ class TestDataService {
     required int repsMax,
     required int rpeMin,
     required int rpeMax,
+    double increment = 5.0,
   }) {
     final setCount = 3 + _rand.nextInt(2); // 3-4 sets
-    final weight = ((workingWeight * effort) / 5).round() * 5.0;
+    final weight = ((workingWeight * effort) / increment).round() * increment;
     return List.generate(setCount, (_) {
       final reps = repsMin + _rand.nextInt(repsMax - repsMin + 1);
       final rpe = (rpeMin + _rand.nextInt(rpeMax - rpeMin + 1)).toDouble();

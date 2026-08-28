@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 
 import '../services/calculator_engine.dart';
+import '../services/number_display.dart';
 import '../services/plate_math.dart';
 import '../services/units.dart';
 import '../theme/app_theme.dart';
@@ -179,12 +180,7 @@ class _BarbellTabState extends State<_BarbellTab> {
   /// Trims a trailing ".0" (`225.0` -> `"225"`) but keeps a real decimal
   /// (`22.5` -> `"22.5"`) — pasted into a gym-log app/text as whatever's
   /// actually needed, not a fixed decimal count.
-  String _copyFormat(double v) {
-    final rounded = double.parse(v.toStringAsFixed(1));
-    return rounded == rounded.roundToDouble()
-        ? rounded.toStringAsFixed(0)
-        : rounded.toStringAsFixed(1);
-  }
+  String _copyFormat(double v) => NumberDisplay.trim(v, maxDecimals: 1);
 
   Future<void> _copyTotal(double total) async {
     await Clipboard.setData(ClipboardData(text: _copyFormat(total)));
@@ -353,7 +349,7 @@ class _BarbellTabState extends State<_BarbellTab> {
               border: Border.all(color: AppColors.border),
             ),
             child: Text(
-              plate.toStringAsFixed(plate == plate.roundToDouble() ? 0 : 1),
+              NumberDisplay.trim(plate, maxDecimals: 1),
               style: AppText.smallText,
             ),
           ),
@@ -443,7 +439,7 @@ class _SimpleCalculatorTabState extends State<_SimpleCalculatorTab> {
 
   String _formatResult(double v) {
     if (v.isNaN || v.isInfinite) return 'Error';
-    return v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(2);
+    return NumberDisplay.trim(v, maxDecimals: 2);
   }
 
   @override

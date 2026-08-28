@@ -10,6 +10,7 @@ import '../../data/repositories/cardio_repository.dart';
 import '../../data/repositories/lift_repository.dart';
 import '../../services/app_services.dart';
 import '../../services/cardio_units.dart';
+import '../../services/number_display.dart';
 import '../../services/units.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/app_card.dart';
@@ -329,7 +330,7 @@ class _HiitReportScreenState extends State<HiitReportScreen> {
           child: TextFormField(
             initialValue: slot.actualWeight == null
                 ? ''
-                : Units.displayValue(slot.actualWeight!).toStringAsFixed(0),
+                : NumberDisplay.trim(Units.displayValue(slot.actualWeight!)),
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             style: AppText.bodyText,
             decoration: InputDecoration(labelText: 'Weight (${Units.suffix})'),

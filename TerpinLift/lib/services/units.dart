@@ -1,8 +1,11 @@
+import 'number_display.dart';
+
 enum WeightUnit { lb, kg }
 
 extension WeightUnitKey on WeightUnit {
   String get key => this == WeightUnit.lb ? 'lb' : 'kg';
-  static WeightUnit fromKey(String? key) => key == 'kg' ? WeightUnit.kg : WeightUnit.lb;
+  static WeightUnit fromKey(String? key) =>
+      key == 'kg' ? WeightUnit.kg : WeightUnit.lb;
 }
 
 /// All weight is stored canonically in lb (see designFiles/01_DATA_MODEL.md).
@@ -28,10 +31,17 @@ abstract class Units {
 
   static String get suffix => current.key;
 
-  static String format(double lb) => '${displayValue(lb).round()} $suffix';
+  /// Shows exactly as much precision as was actually logged, never more —
+  /// converting to kg introduces its own derived decimals the user never
+  /// typed (100 lb -> 45.359237 kg), so that branch is capped tighter (2
+  /// decimals, standard kg-plate granularity) than lb's full precision.
+  static String format(double lb) => current == WeightUnit.lb
+      ? '${NumberDisplay.trim(displayValue(lb))} $suffix'
+      : '${NumberDisplay.trim(displayValue(lb), maxDecimals: 2)} $suffix';
 
   /// Same as [format], but returns a masked "---lb" placeholder when
   /// [hideWeight] is on — the single call site every weight display should
   /// go through so the setting applies consistently everywhere.
-  static String formatMaskable(double lb) => hideWeight ? '--- $suffix' : format(lb);
+  static String formatMaskable(double lb) =>
+      hideWeight ? '--- $suffix' : format(lb);
 }

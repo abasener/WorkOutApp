@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import '../data/models/lift_set.dart';
 import '../data/models/workout_plan.dart';
 import '../data/repositories/lift_repository.dart';
+import 'number_display.dart';
 import 'user_profile.dart';
 
 enum LiftIntensity { allOut, normal, recovery }
@@ -67,16 +68,26 @@ class TrendEngine {
       final completedAt = s.session.completedAt;
       if (startedAt == null || completedAt == null) continue;
       final minutes =
-          DateTime.parse(completedAt).difference(DateTime.parse(startedAt)).inSeconds / 60;
-      if (minutes <= 0) continue; // clock skew/bad data guard, not a real duration
+          DateTime.parse(
+            completedAt,
+          ).difference(DateTime.parse(startedAt)).inSeconds /
+          60;
+      if (minutes <= 0) {
+        continue; // clock skew/bad data guard, not a real duration
+      }
       result[s.session.date] = (result[s.session.date] ?? 0) + minutes;
     }
 
     final plannedByDate = <String, double>{};
     for (final p in plannedSessions) {
-      if (p.status != PlannedSessionStatus.completed || p.completedAt == null) continue;
+      if (p.status != PlannedSessionStatus.completed || p.completedAt == null) {
+        continue;
+      }
       final minutes =
-          DateTime.parse(p.completedAt!).difference(DateTime.parse(p.startedAt)).inSeconds / 60;
+          DateTime.parse(
+            p.completedAt!,
+          ).difference(DateTime.parse(p.startedAt)).inSeconds /
+          60;
       if (minutes <= 0) continue;
       plannedByDate[p.date] = (plannedByDate[p.date] ?? 0) + minutes;
     }
@@ -139,10 +150,20 @@ class TrendEngine {
   }) {
     final withSets = sessions.where((s) => s.sets.isNotEmpty).toList();
     if (withSets.isEmpty) return null;
-    return withSets
-        .take(3)
+    final recentSessions = withSets.take(3).toList();
+    final best = recentSessions
         .map((s) => _bestE1rmForGender(s, gender))
         .reduce((a, b) => a > b ? a : b);
+
+    // Precision matches what was actually logged in these recent sessions,
+    // not whatever raw digits the Epley formula happens to produce — same
+    // rule as predictNextAtCharacteristicReps, see NumberDisplay.
+    final referenceWeights = [
+      for (final s in recentSessions)
+        for (final set in s.sets) set.weight,
+    ];
+    final precision = NumberDisplay.precisionNeeded(referenceWeights);
+    return NumberDisplay.roundTo(best, precision);
   }
 
   /// The near-term "what to aim for" prediction (`07_SMART_TRENDS.md`
@@ -179,7 +200,7 @@ class TrendEngine {
   /// added load) for bodyweight-tagged exercises, since their `weight`
   /// field is only the added/assisted load on its own.
   static ({int reps, double low, double goal, double high, int sampleSize})?
-      predictNextAtCharacteristicReps(
+  predictNextAtCharacteristicReps(
     List<SessionWithSets> sessions, {
     double Function(LiftSet)? loadOf,
   }) {
@@ -216,11 +237,18 @@ class TrendEngine {
     final n = sameRepHistory.length;
     final band = (40 / math.sqrt(n)).clamp(5.0, 40.0);
 
+    // Precision matches what was actually logged for this rep count, not
+    // whatever raw digits the averaging above happens to produce — e.g.
+    // history of 1, 2.5, 3 predicts "5.3", not a falsely-precise "5.333333"
+    // or an over-rounded "5".
+    final precision = NumberDisplay.precisionNeeded(sameRepHistory);
+    double roundedTo(double v) => NumberDisplay.roundTo(v, precision);
+
     return (
       reps: characteristicReps,
-      low: goal - band,
-      goal: goal,
-      high: goal + band,
+      low: roundedTo(goal - band),
+      goal: roundedTo(goal),
+      high: roundedTo(goal + band),
       sampleSize: n,
     );
   }

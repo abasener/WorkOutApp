@@ -4,6 +4,7 @@ import '../../data/models/exercise.dart';
 import '../../data/models/lift_set.dart';
 import '../../services/app_services.dart';
 import '../../services/effort_display.dart';
+import '../../services/number_display.dart';
 import '../../services/units.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/date_picker_field.dart';
@@ -332,7 +333,9 @@ class _LogLiftFormState extends State<LogLiftForm> {
           Expanded(
             child: TextFormField(
               key: ValueKey('weight_$i'),
-              initialValue: Units.displayValue(set.weightLb).toStringAsFixed(0),
+              initialValue: NumberDisplay.trim(
+                Units.displayValue(set.weightLb),
+              ),
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,
               ),
